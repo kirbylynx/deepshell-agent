@@ -1,0 +1,102 @@
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(69, 123, 157, 0.35), transparent 34%),
+    radial-gradient(circle at bottom right, rgba(29, 53, 87, 0.28), transparent 32%),
+    #0f172a;
+  color: #e2e8f0;
+  font-family:
+    "SF Pro Display",
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    sans-serif;
+}
+
+.shell {
+  box-sizing: border-box;
+  min-height: 100vh;
+  padding: 48px;
+  display: grid;
+  gap: 24px;
+  align-content: center;
+}
+
+.hero,
+.panel {
+  max-width: 720px;
+}
+
+.eyebrow {
+  margin: 0 0 14px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #93c5fd;
+  font-size: 12px;
+}
+
+h1 {
+  margin: 0;
+  font-size: clamp(40px, 7vw, 68px);
+  line-height: 0.95;
+  max-width: 12ch;
+}
+
+.status {
+  margin: 18px 0 0;
+  color: #cbd5e1;
+  font-size: 18px;
+}
+
+.panel {
+  padding: 24px;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 20px;
+  background: rgba(15, 23, 42, 0.58);
+  backdrop-filter: blur(14px);
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.24);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+
+dt {
+  color: #94a3b8;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+dd {
+  margin: 8px 0 0;
+  font-size: 16px;
+  color: #f8fafc;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+  flex-wrap: wrap;
+}
+
+button {
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 18px;
+  font-weight: 600;
+  color: #0f172a;
+  background: #e2e8f0;
+  cursor: pointer;
+}
+
+button.ghost {
+  color: #e2e8f0;
+  background: rgba(148, 163, 184, 0.2);
+}

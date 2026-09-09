@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">DeepShell Agent icon</title>
+  <desc id="desc">A minimalist bright scallop shell with a terminal prompt, on a deep navy rounded square.</desc>
+  <defs>
+    <linearGradient id="deepshell-bg" x1="164" y1="96" x2="860" y2="928" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0B59B8"/>
+      <stop offset="0.55" stop-color="#07356E"/>
+      <stop offset="1" stop-color="#031225"/>
+    </linearGradient>
+    <linearGradient id="deepshell-shell" x1="512" y1="178" x2="512" y2="852" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#92FFF3"/>
+      <stop offset="0.45" stop-color="#22E6F2"/>
+      <stop offset="1" stop-color="#178BFF"/>
+    </linearGradient>
+    <linearGradient id="deepshell-edge" x1="240" y1="232" x2="810" y2="796" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#C1FFF8" stop-opacity="0.58"/>
+      <stop offset="0.52" stop-color="#65F6FF" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#0D5FCD" stop-opacity="0.18"/>
+    </linearGradient>
+    <filter id="deepshell-soft-shadow" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#00162F" flood-opacity="0.32"/>
+    </filter>
+  </defs>
+
+  <rect x="48" y="48" width="928" height="928" rx="214" fill="url(#deepshell-bg)"/>
+  <path
+    d="M512 164
+       C451 164 430 226 399 268
+       C352 241 296 269 285 323
+       C235 323 196 359 193 410
+       C146 426 124 475 146 520
+       C173 577 223 625 292 663
+       L236 674
+       C203 681 181 707 183 739
+       C224 760 287 759 342 744
+       C384 794 446 828 512 846
+       C578 828 640 794 682 744
+       C737 759 800 760 841 739
+       C843 707 821 681 788 674
+       L732 663
+       C801 625 851 577 878 520
+       C900 475 878 426 831 410
+       C828 359 789 323 739 323
+       C728 269 672 241 625 268
+       C594 226 573 164 512 164Z"
+    fill="url(#deepshell-shell)"
+    filter="url(#deepshell-soft-shadow)"/>
+  <path
+    d="M512 164
+       C451 164 430 226 399 268
+       C352 241 296 269 285 323
+       C235 323 196 359 193 410
+       C146 426 124 475 146 520
+       C173 577 223 625 292 663
+       L236 674
+       C203 681 181 707 183 739
+       C224 760 287 759 342 744
+       C384 794 446 828 512 846
+       C578 828 640 794 682 744
+       C737 759 800 760 841 739
+       C843 707 821 681 788 674
+       L732 663
+       C801 625 851 577 878 520
+       C900 475 878 426 831 410
+       C828 359 789 323 739 323
+       C728 269 672 241 625 268
+       C594 226 573 164 512 164Z"
+    fill="url(#deepshell-edge)"/>
+
+  <g fill="none" stroke="#042350" stroke-width="14" stroke-linecap="round" stroke-opacity="0.82">
+    <path d="M399 270 C429 314 445 354 450 386"/>
+    <path d="M625 270 C595 314 579 354 574 386"/>
+    <path d="M286 324 C335 364 369 410 387 452"/>
+    <path d="M738 324 C689 364 655 410 637 452"/>
+    <path d="M196 412 C264 462 314 527 348 604"/>
+    <path d="M828 412 C760 462 710 527 676 604"/>
+    <path d="M293 664 C338 681 377 708 407 744"/>
+    <path d="M731 664 C686 681 647 708 617 744"/>
+  </g>
+
+  <g fill="none" stroke="#021529" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M386 390 L510 506 L386 622" stroke-width="76"/>
+    <path d="M588 604 H710" stroke-width="64"/>
+  </g>
+</svg>

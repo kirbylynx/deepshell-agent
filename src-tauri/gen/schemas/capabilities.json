@@ -1,0 +1,1 @@
+{"main-bootstrap":{"identifier":"main-bootstrap","description":"本地 Bootstrap 视图所需的最小核心能力","local":true,"windows":["main"],"permissions":["core:default"]}}

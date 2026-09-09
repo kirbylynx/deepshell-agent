@@ -1,0 +1,10 @@
+- id: session-telemetry-otel
+  disabled: true
+
+- id: agent-presets
+  config:
+    default: deepshell-coding
+
+- insert:
+    - id: deepshell-desktop
+      name: '@deepshell-agent/dsh-desktop'

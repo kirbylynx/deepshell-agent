@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "DeepShell Agent",
+  "version": "0.1.0",
+  "identifier": "com.deepshell.agent",
+  "build": {
+    "beforeDevCommand": "pnpm runtime:prepare && pnpm profile:prepare && pnpm dev:vite",
+    "beforeBuildCommand": "pnpm runtime:prepare && pnpm profile:prepare && pnpm build",
+    "devUrl": "http://localhost:5173",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [],
+    "security": {
+      "csp": "default-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app", "dmg", "nsis"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": {
+      "../runtime/node/": "runtime/node/",
+      "../runtime/dsh/": "runtime/dsh/",
+      "../runtime/profile-template/": "runtime/profile-template/"
+    },
+    "macOS": {
+      "minimumSystemVersion": "13.0"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "embedBootstrapper"
+      },
+      "nsis": {
+        "installerIcon": "icons/icon.png",
+        "displayLanguageSelector": false
+      }
+    }
+  }
+}

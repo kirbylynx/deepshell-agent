@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schemaVersion", "applicationVersion", "platforms", "node", "dsh", "tooling", "security"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "applicationVersion": { "const": "0.1.0" },
+    "platforms": {
+      "type": "array",
+      "items": { "enum": ["darwin-arm64", "win32-x64"] },
+      "minItems": 2,
+      "uniqueItems": true,
+      "contains": { "const": "darwin-arm64" }
+    },
+    "node": {
+      "type": "object",
+      "required": ["version", "targets"],
+      "properties": {
+        "version": { "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$" },
+        "targets": {
+          "type": "object",
+          "required": ["darwin-arm64", "win32-x64"],
+          "properties": {
+            "darwin-arm64": { "$ref": "#/$defs/nodeTarget" },
+            "win32-x64": { "$ref": "#/$defs/nodeTarget" }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "dsh": {
+      "type": "object",
+      "required": ["package", "version", "integrity", "entry", "profile", "desktopBundle"],
+      "properties": {
+        "package": { "const": "@deepseek-ai/dsh" },
+        "version": { "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+-rc\\.[0-9]+$" },
+        "integrity": { "pattern": "^sha512-" },
+        "entry": { "type": "string" },
+        "profile": { "const": "web" },
+        "desktopBundle": { "const": "@deepshell-agent/dsh-desktop" }
+      }
+    }
+  },
+  "$defs": {
+    "nodeTarget": {
+      "type": "object",
+      "required": ["url", "sha256", "archiveType", "executable"],
+      "properties": {
+        "url": { "pattern": "^https://nodejs\\.org/" },
+        "sha256": { "pattern": "^[a-f0-9]{64}$" },
+        "archiveType": { "enum": ["tar.gz", "zip"] },
+        "executable": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

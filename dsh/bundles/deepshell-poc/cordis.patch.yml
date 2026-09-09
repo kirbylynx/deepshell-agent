@@ -1,0 +1,16 @@
+- id: session-telemetry-otel
+  disabled: true
+
+- id: web-search-deepseek
+  disabled: true
+
+- id: web-fetch-http
+  disabled: true
+
+- id: agent-presets
+  config:
+    default: deepshell
+
+- insert:
+    - id: deepshell-poc
+      name: '@deepshell-agent/dsh-poc'

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    />
+    <title>DeepShell Agent</title>
+    <link rel="stylesheet" href="./bootstrap.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero">
+        <p class="eyebrow">DeepShell Agent</p>
+        <h1>A desktop agent powered by DeepSeek Harness.</h1>
+        <p id="status" class="status">准备启动中…</p>
+      </section>
+
+      <section class="panel">
+        <dl class="grid">
+          <div>
+            <dt>Runtime</dt>
+            <dd id="runtime-phase">starting</dd>
+          </div>
+          <div>
+            <dt>Sidecar</dt>
+            <dd id="sidecar-pid">-</dd>
+          </div>
+          <div>
+            <dt>Authority</dt>
+            <dd id="authority">-</dd>
+          </div>
+          <div>
+            <dt>Token</dt>
+            <dd id="token-state">unavailable</dd>
+          </div>
+          <div>
+            <dt>Error code</dt>
+            <dd id="error-code">-</dd>
+          </div>
+        </dl>
+
+        <div class="actions">
+          <button id="restart" type="button">重启 Runtime</button>
+          <button id="logs" type="button">打开日志</button>
+          <button id="quit" type="button" class="ghost">退出</button>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="./bootstrap.ts"></script>
+  </body>
+</html>

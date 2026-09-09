@@ -1,0 +1,70 @@
+{
+  "name": "deepshell-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A desktop agent powered by DeepSeek Harness.",
+  "license": "MIT",
+  "packageManager": "pnpm@10.30.2",
+  "engines": { "node": ">=24.0.0" },
+  "scripts": {
+    "dev": "tauri dev",
+    "dev:vite": "vite",
+    "build": "vite build",
+    "check": "cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings && pnpm typecheck && pnpm test:all && pnpm runtime:verify && pnpm profile:verify && pnpm package:compare",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "vitest run --root . tests/unit",
+    "test:contract": "vitest run --root . tests/contract",
+    "test:integration": "vitest run --root . tests/integration --passWithNoTests",
+    "test:security": "vitest run --root . tests/security",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml --all-features",
+    "package:e2e": "tauri build --features poc-e2e --bundles app && pnpm package:sign && node scripts/verify-package.mjs e2e && node scripts/capture-package-manifest.mjs e2e",
+    "test:e2e": "pnpm package:e2e && node scripts/run-e2e.mjs",
+    "test:all": "pnpm test:rust && pnpm test:unit && pnpm test:contract && pnpm test:integration && pnpm test:security",
+    "runtime:prepare": "node scripts/prepare-runtime.mjs",
+    "runtime:verify": "node scripts/verify-runtime.mjs",
+    "profile:prepare": "node scripts/prepare-profile.mjs",
+    "profile:verify": "node scripts/verify-profile.mjs",
+    "runtime:smoke": "node scripts/smoke-dsh.mjs",
+    "package:release": "pnpm package:mvp",
+    "package:mvp": "node scripts/package-mvp.mjs",
+    "package:verified": "pnpm package:e2e && pnpm package:mvp",
+    "package:sign": "node scripts/sign-package.mjs",
+    "package:verify": "node scripts/verify-package.mjs release",
+    "package:compare": "node scripts/compare-e2e-release.mjs",
+    "evidence:collect": "node scripts/collect-evidence.mjs",
+    "licenses:collect": "node scripts/collect-licenses.mjs",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh": "0.1.2-rc.1",
+    "@tauri-apps/cli": "2.11.4",
+    "@types/node": "26.4.1",
+    "@wdio/cli": "9.31.5",
+    "@wdio/globals": "9.31.3",
+    "@wdio/local-runner": "9.31.5",
+    "@wdio/mocha-framework": "9.31.5",
+    "@wdio/spec-reporter": "9.31.2",
+    "@wdio/tauri-plugin": "1.3.0",
+    "@wdio/tauri-service": "1.3.0",
+    "@wdio/types": "9.31.2",
+    "ajv": "8.20.0",
+    "expect-webdriverio": "6.0.10",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vitest": "5.0.0",
+    "ws": "8.21.3"
+  },
+  "pnpm": {
+    "overrides": {
+      "react": "18.3.1",
+      "react-dom": "18.3.1",
+      "expect-webdriverio": "6.0.10"
+    }
+  }
+}
