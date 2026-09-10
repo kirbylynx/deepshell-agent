@@ -102,8 +102,8 @@ fn open_http_external(url: &Url) -> Result<(), AppError> {
 
 #[cfg(target_os = "windows")]
 fn open_http_external(url: &Url) -> Result<(), AppError> {
-    Command::new("cmd")
-        .args(["/C", "start", "", url.as_str()])
+    Command::new("rundll32.exe")
+        .args(["url.dll,FileProtocolHandler", url.as_str()])
         .spawn()
         .map(|_| ())
         .map_err(|error| {

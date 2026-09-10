@@ -345,8 +345,8 @@ fn runtime_stop_error(error: std::io::Error) -> AppError {
 pub fn open_logs_directory(root: &Path, _: &AppHandle) -> Result<(), AppError> {
     fs::create_dir_all(root)
         .map_err(|error| AppError::new(ErrorCode::LogsUnavailable, error.to_string()))?;
-    Command::new("cmd")
-        .args(["/C", "start", "", &root.display().to_string()])
+    Command::new("explorer.exe")
+        .arg(root)
         .spawn()
         .map(|_| ())
         .map_err(|error| AppError::new(ErrorCode::LogsUnavailable, error.to_string()))
