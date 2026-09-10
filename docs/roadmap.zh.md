@@ -6,7 +6,7 @@
 >
 > **Tagline:** A desktop agent powered by DeepSeek Harness.
 >
-> **状态：** 功能池、优先级与实现状态基线；`v0.0.1` POC 已完成可行性验证，`v0.1.0` MVP 已落地项在功能池中单独标注
+> **状态：** 功能池、优先级、实现状态与当前活跃版本规划基线；`v0.0.1` POC 已完成可行性验证，`v0.1.0` MVP 已落地项已标注，选定的 `v0.1.1` 项已标为待实现
 >
 > **日期：** 2026-09-06
 
@@ -53,11 +53,12 @@
 
 优先级只表达相对重要性，不等同于版本归属。相同优先级的功能也不代表同时开发。
 
-状态列只记录当前实现事实：
+状态列记录当前实现事实和已确认的活跃版本规划事实：
 
 - `已实现（v0.1.0）` 表示该功能已在 `v0.1.0` MVP 中落地并纳入当前验证基线。
+- `待实现（v0.1.1）` 表示该功能已进入当前 `v0.1.1` 规划/开发分支，但尚未作为已实现功能落地。
 - `未开始` 表示该 Roadmap 功能项尚未作为完整功能落地；如果某个组合项只完成了一部分，也仍按未完整实现处理。
-- 状态列不是后续版本承诺，不替代 Release Requirements 或 Milestone 文档。
+- `待实现` 不是实现声明，也不替代需求、设计、实施计划或版本收口文档。
 
 ## 4. 功能池
 
@@ -95,7 +96,7 @@
 | UI-001 | Official DSH Web UI | 直接复用官方 React Web Client | P0 | 已实现（v0.1.0） |
 | UI-002 | DeepShell Branding Plugin | 产品名、tagline、Logo 和基础品牌入口 | P0 | 已实现（v0.1.0） |
 | UI-003 | 正式视觉品牌 | 正式 Logo、图标、色彩、主题和应用素材 | P1 | 已实现（v0.1.0） |
-| UI-004 | Agent Mode 入口 | 显示并切换 General、Coding、Work | P1 | 未开始 |
+| UI-004 | Agent Mode 入口 | 显示并切换 General、Coding、Work | P1 | 待实现（v0.1.1） |
 | UI-005 | Coding Repository 视图 | 展示仓库、分支、状态和相关操作 | P1 | 未开始 |
 | UI-006 | Git 视图 | 展示 Diff、变更、提交与工作树状态 | P1 | 未开始 |
 | UI-007 | Tests 视图 | 展示测试执行、进度和失败详情 | P1 | 未开始 |
@@ -154,13 +155,14 @@
 | MODE-002 | General Mode | 面向通用问答、本地任务和轻量研究 | P1 | 未开始 |
 | MODE-003 | Work Mode | 面向文档、分析和企业工作流 | P1 | 已实现（v0.1.0） |
 | MODE-004 | Coding Preset 映射 | Coding Mode 映射到 Session 级官方 Preset | P0 | 已实现（v0.1.0） |
-| MODE-005 | General/Work Preset 映射 | General 和 Work 映射到 Session 级官方 Preset | P1 | 未开始 |
+| MODE-005 | Work Preset 映射 | Work Mode 映射到 Session 级官方 Preset | P1 | 已实现（v0.1.0） |
 | MODE-006 | Instructions 配置 | 为不同 Mode 组合指令 | P1 | 未开始 |
 | MODE-007 | Skills 配置 | 为不同 Mode 组合默认 Skills | P1 | 未开始 |
 | MODE-008 | Tool Groups | 为不同 Mode 收敛工具集合 | P1 | 未开始 |
 | MODE-009 | Context Strategy | 为不同 Mode 选择上下文策略 | P2 | 未开始 |
 | MODE-010 | Mode 切换快照 | 新 Run 生效，运行中的 Run 保持启动快照 | P1 | 已实现（v0.1.0） |
 | MODE-011 | Research/Data/Recruiting/Engineering Mode | 基于真实需求扩展工作模式 | P2 | 未开始 |
+| MODE-012 | General Preset 映射 | General Mode 映射到 Session 级官方 Preset | P1 | 待实现（v0.1.1） |
 
 ### 4.6 Session、Conversation 与运行状态
 
@@ -225,8 +227,8 @@
 | SAFE-012 | 平台 Sandbox 能力矩阵 | 展示 macOS/Windows/Linux 实际保护和降级 | P1 | 未开始 |
 | SAFE-013 | MCP 权限与来源展示 | 显示命令、URL、工具、凭据和风险 | P1 | 未开始 |
 | SAFE-014 | Plugin 安全策略 | 限制高权限扩展的来源和加载 | P1 | 未开始 |
-| SAFE-015 | SBOM | 生成软件物料清单 | P1 | 未开始 |
-| SAFE-016 | 漏洞扫描 | 扫描 Rust、Node 与打包依赖 | P1 | 未开始 |
+| SAFE-015 | SBOM | 生成软件物料清单 | P1 | 待实现（v0.1.1） |
+| SAFE-016 | 漏洞扫描 | 扫描 Rust、Node 与打包依赖 | P1 | 待实现（v0.1.1） |
 | SAFE-017 | 审计追踪 | 关联 Run、Tool Call、Approval 和配置变化 | P1 | 未开始 |
 | SAFE-018 | Prompt Injection 防护 | 标记不可信来源并控制工具与外发边界 | P1 | 未开始 |
 
@@ -307,8 +309,8 @@
 | OPS-004 | 结构化日志 | 关联应用、DSH、Session、Run 和 Tool Call | P0 | 已实现（v0.1.0） |
 | OPS-005 | 日志脱敏与轮转 | 控制 Secret、内容和磁盘增长 | P0 | 已实现（v0.1.0） |
 | OPS-006 | Runtime 状态 | 区分 Desktop、Sidecar、Client、Provider 和 MCP 状态 | P0 | 已实现（v0.1.0） |
-| OPS-007 | 诊断包 | 用户可预览、脱敏并导出诊断信息 | P1 | 未开始 |
-| OPS-008 | 性能观测 | 启动、内存、体积和运行耗时 | P1 | 未开始 |
+| OPS-007 | 诊断包 | 用户可预览、脱敏并导出诊断信息 | P1 | 待实现（v0.1.1） |
+| OPS-008 | 性能观测 | 启动、内存、体积和运行耗时 | P1 | 待实现（v0.1.1） |
 | OPS-009 | 配置与数据迁移 | 幂等升级并验证可读性 | P1 | 已实现（v0.1.0） |
 | OPS-010 | 升级前备份与恢复 | 有限备份、失败停止和恢复说明 | P1 | 未开始 |
 | OPS-011 | 数据清理 | 明确清除 Session、缓存或全部应用数据 | P2 | 未开始 |
@@ -326,15 +328,16 @@
 | REL-004 | macOS `.dmg` | 生成 macOS 安装镜像；正式分发仍依赖签名和公证 | P1 | 已实现（v0.1.0） |
 | REL-005 | macOS Developer ID 签名 | 对应用、Node 和 Sidecar 签名 | P1 | 未开始 |
 | REL-006 | Apple Notarization | 完成公证和 Gatekeeper 验证 | P1 | 未开始 |
-| REL-007 | Windows x64 | 支持 WebView2、PowerShell Sandbox 和安装包 | P1 | 未开始 |
+| REL-007 | Windows x64 | 支持 WebView2、PowerShell Sandbox 和安装包 | P1 | 待实现（v0.1.1） |
 | REL-008 | Windows Code Signing | 对应用和 Sidecar 签名 | P1 | 未开始 |
 | REL-009 | Linux Desktop | 支持 WebKitGTK 和平台 Sandbox | P3 | 未开始 |
 | REL-010 | Auto Update | 检查、下载和安装签名更新 | P1 | 未开始 |
 | REL-011 | 原子 Compatibility Set | App、Node、DSH 和 First-party Plugin 同步升级 | P1 | 已实现（v0.1.0） |
 | REL-012 | 数据迁移兼容 | 更新后 Session、Settings 和 Credentials 可读 | P1 | 已实现（v0.1.0） |
-| REL-013 | 安装/升级/卸载测试 | 验证真实安装产物和数据保留 | P1 | 未开始 |
+| REL-013 | 安装/升级/卸载测试 | 验证真实安装产物和数据保留 | P1 | 待实现（v0.1.1） |
 | REL-014 | 跨 WebView 验收 | WKWebView、WebView2 和 WebKitGTK 差异测试 | P1 | 未开始 |
 | REL-015 | Mobile | iOS/Android 客户端或伴侣应用 | P3 | 未开始 |
+| REL-016 | Release staging 自动化 | 准备公开 release 资产、校验和、license inventory、SBOM/report 引用和 release notes 草稿，但不执行发布 | P1 | 待实现（v0.1.1） |
 
 ### 4.15 测试与质量保障
 
@@ -379,4 +382,4 @@
 6. 定义可验证的完成标准。
 7. 再将功能分配到具体版本。
 
-当前 Roadmap 的状态列只记录已发生的实现事实，不提前承诺未开始功能的目标版本。任何后续版本规划都应在独立的 Release Requirements 或 Milestone 文档中完成，不直接改写本功能池的优先级含义。
+当前 Roadmap 的状态列记录已发生的实现事实和已确认的活跃版本规划事实。`待实现` 不是实现声明。任何后续版本规划都应在独立的 Release Requirements 或 Milestone 文档中完成，不直接改写本功能池的优先级含义。
