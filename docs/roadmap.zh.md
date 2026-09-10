@@ -6,7 +6,7 @@
 >
 > **Tagline:** A desktop agent powered by DeepSeek Harness.
 >
-> **状态：** 功能池、优先级、实现状态与发布规划基线；`v0.0.1` POC 已完成可行性验证，`v0.1.0` MVP 已落地项已标注，选定的 `v0.1.1` 发布硬化项已落地
+> **状态：** 功能池、优先级、实现状态与发布规划基线；`v0.0.1` POC 已完成可行性验证，`v0.1.0` MVP 已落地项已标注，选定的 `v0.1.1` 发布硬化项已落地，选定的 `v0.1.2` DSH runtime refresh 项已规划
 >
 > **日期：** 2026-09-10
 
@@ -59,6 +59,7 @@
 - `已实现（v0.1.0）` 表示该功能已在 `v0.1.0` MVP 中落地并纳入当前验证基线。
 - `已实现（v0.1.1）` 表示该功能已在 `v0.1.1` 发布硬化基线中落地，并纳入当前验证范围。
 - `待实现（v0.1.1）` 表示该功能已进入当前 `v0.1.1` 规划/开发分支，但尚未作为已实现功能落地。
+- `待实现（v0.1.2）` 表示该功能已进入当前 `v0.1.2` DSH runtime refresh 分支，但尚未作为已实现功能落地。
 - `未开始` 表示该 Roadmap 功能项尚未作为完整功能落地；如果某个组合项只完成了一部分，也仍按未完整实现处理。
 - `待实现` 不是实现声明，也不替代需求、设计、实施计划或版本收口文档。
 
@@ -129,6 +130,7 @@
 | EXT-009 | Plugin 签名与来源验证 | 验证发布者、完整性和版本来源 | P3 | 未开始 |
 | EXT-010 | Agent Mode Marketplace | 分发面向用户的模式组合 | P3 | 未开始 |
 | EXT-011 | 复杂 Profile/Mode 继承 | 版本、依赖、继承和冲突解析 | P3 | 未开始 |
+| EXT-012 | DSH 0.1.5 Plugin API 兼容 | 保持 DeepShell First-party Client/UI 和 Bundle 集成兼容上游 DSH 0.1.5 公开扩展契约 | P0 | 待实现（v0.1.2） |
 
 ### 4.4 模型与凭据
 
@@ -142,6 +144,7 @@
 | MODEL-006 | Custom Provider | 配置 OpenAI-compatible 等自定义 endpoint | P2 | 已实现（v0.1.0） |
 | MODEL-007 | 模型选择 | 按 Session 选择模型并保存事实 | P1 | 已实现（v0.1.0） |
 | MODEL-008 | Provider 可用性状态 | 区分未配置、认证失败和服务不可用 | P1 | 已实现（v0.1.0） |
+| MODEL-009 | DeepSeek-V4.1-Flash 兼容 | 接入并验证上游 DeepSeek adapter/catalog 对 `DeepSeek-V41-Flash` / `deepseek-flash` 的能力和默认模型行为 | P0 | 待实现（v0.1.2） |
 | CRED-001 | DSH credentials-local | Credential Reference 与只写 Secret 配置 | P0 | 已实现（v0.1.0） |
 | CRED-002 | Secret 脱敏 | Secret 不进入 Session、日志或诊断包 | P0 | 已实现（v0.1.0） |
 | CRED-003 | macOS Keychain Provider | 使用符合 DSH 契约的系统凭据 Provider | P2 | 未开始 |
@@ -190,6 +193,7 @@
 | SESSION-018 | Delete | 删除 Session 数据并提供明确确认 | P2 | 未开始 |
 | SESSION-019 | Session 导出 | 导出可审计的会话与运行记录 | P2 | 未开始 |
 | SESSION-020 | 多机 Session 同步 | 在设备之间同步和恢复 Session | P3 | 未开始 |
+| SESSION-021 | DSH Session format V3 迁移保护 | DSH runtime refresh 后验证旧 Session 可读/可迁移、不可降级行为和失败安全提示 | P0 | 待实现（v0.1.2） |
 
 ### 4.7 Workspace、文件、Shell 与 Git
 
@@ -314,7 +318,7 @@
 | OPS-007 | 诊断包 | 用户可预览、脱敏并导出诊断信息 | P1 | 已实现（v0.1.1） |
 | OPS-008 | 性能观测 | 启动、内存、体积和运行耗时 | P1 | 已实现（v0.1.1） |
 | OPS-009 | 配置与数据迁移 | 幂等升级并验证可读性 | P1 | 已实现（v0.1.0） |
-| OPS-010 | 升级前备份与恢复 | 有限备份、失败停止和恢复说明 | P1 | 未开始 |
+| OPS-010 | 升级前备份与恢复 | 有限备份、失败停止和恢复说明 | P1 | 待实现（v0.1.2） |
 | OPS-011 | 数据清理 | 明确清除 Session、缓存或全部应用数据 | P2 | 未开始 |
 | OPS-012 | 卸载数据保留策略 | 默认保留并提供显式清理方法 | P2 | 未开始 |
 | OPS-013 | Opt-in 遥测 | 用户主动启用的产品指标 | P3 | 未开始 |
@@ -342,6 +346,7 @@
 | REL-016 | Release staging 自动化 | 准备公开 release 资产、校验和、license inventory、SBOM/report 引用和 release notes 草稿，但不执行发布 | P1 | 已实现（v0.1.1） |
 | REL-017 | Windows x64 installer 验收 | 在真实 Windows 或 CI 中验证实际 NSIS installer、WebView2 首启、Session 创建、退出清理和卸载行为 | P1 | 未开始 |
 | REL-018 | 签名二进制分发 | 面向普通用户发布已签名/已公证的平台安装包 | P1 | 未开始 |
+| REL-019 | DSH runtime refresh to 0.1.5 | 原子升级 pinned DSH runtime、lockfile、profile、First-party Bundle 兼容、release artifacts 和公开文档到上游 DSH 0.1.5 兼容集 | P0 | 待实现（v0.1.2） |
 
 ### 4.15 测试与质量保障
 
@@ -354,7 +359,7 @@
 | QA-005 | Security Tests | Origin/Auth、CSP、XSS、路径与 Secret | P0 | 已实现（v0.1.0） |
 | QA-006 | Packaging Tests | 在无开发依赖环境运行安装产物 | P0 | 已实现（v0.1.0） |
 | QA-007 | Crash Recovery Tests | Sidecar 和 Tool 子进程异常场景 | P0 | 已实现（v0.1.0） |
-| QA-008 | DSH Upgrade Regression | 每次上游升级执行固定回归清单 | P1 | 未开始 |
+| QA-008 | DSH Upgrade Regression | 每次上游升级执行固定回归清单 | P1 | 待实现（v0.1.2） |
 | QA-009 | Document Parser Tests | 格式、来源、资源限制和恶意文件 | P1 | 未开始 |
 | QA-010 | MCP Failure Isolation | Server 崩溃、超时和协议错误 | P1 | 未开始 |
 | QA-011 | Performance Regression | 启动、内存、体积和响应趋势 | P2 | 未开始 |
