@@ -1,4 +1,7 @@
 import { spawn } from 'node:child_process'
+import { readFile } from 'node:fs/promises'
+import { resolve } from 'node:path'
+import { root } from './lib/runtime.mjs'
 
 function run(command, args) {
   return new Promise((resolve, reject) => {
@@ -9,6 +12,7 @@ function run(command, args) {
 }
 
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
+const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
 
 if (process.platform === 'darwin') {
   await run(pnpm, ['exec', 'tauri', 'build', '--bundles', 'app'])
@@ -21,5 +25,5 @@ if (process.platform === 'darwin') {
   await run(pnpm, ['exec', 'tauri', 'build', '--bundles', 'nsis'])
   console.log('Windows NSIS installer built; Windows signing and package-manifest capture are deferred to the Windows release lane.')
 } else {
-  throw new Error(`v0.1.0 MVP 暂不支持当前打包平台：${process.platform}`)
+  throw new Error(`DeepShell Agent v${pkg.version} 暂不支持当前打包平台：${process.platform}`)
 }

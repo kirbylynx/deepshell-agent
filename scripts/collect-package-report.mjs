@@ -93,8 +93,10 @@ const windowsInstallerMetric = async () => {
   }
   return fileMetric(windowsInstaller)
 }
-const licenseInventory = await optionalJson(resolve(root, 'runtime/staging/license-inventory.json')) ??
-  await optionalJson(resolve(root, 'docs/plans/v0.1.0-mvp/evidence/licenses.json'))
+const licenseInventory = await optionalJson(resolve(argValue('--license-inventory', resolve(root, 'runtime/staging/license-inventory.json'))))
+if (licenseInventory !== null && licenseInventory.application?.version !== version) {
+  throw new Error(`license inventory 版本不一致：expected ${version}, got ${licenseInventory.application?.version ?? 'unknown'}`)
+}
 const releaseManifest = await optionalJson(resolve(root, 'runtime/staging/package-release.json'))
 const report = {
   schemaVersion: 1,

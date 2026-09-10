@@ -6,9 +6,9 @@ Language: English | [简体中文](roadmap.zh.md)
 >
 > **Tagline:** A desktop agent powered by DeepSeek Harness.
 >
-> **Status:** Feature pool, priority, implementation status, and confirmed active-version planning baseline; `v0.0.1` POC has completed feasibility validation, implemented `v0.1.0` MVP items are marked, and selected `v0.1.1` items are marked as planned.
+> **Status:** Feature pool, priority, implementation status, and release-planning baseline; `v0.0.1` POC has completed feasibility validation, `v0.1.0` MVP items are marked, and selected `v0.1.1` release-hardening items have landed.
 >
-> **Date:** 2026-09-06
+> **Date:** 2026-09-10
 
 ## 1. Purpose
 
@@ -19,6 +19,7 @@ Public architecture, release closeout, and feature status are documented in:
 - [`docs/architecture.md`](architecture.md)
 - [`docs/releases/v0.0.1.md`](releases/v0.0.1.md)
 - [`docs/releases/v0.1.0.md`](releases/v0.1.0.md)
+- [`docs/releases/v0.1.1.md`](releases/v0.1.1.md)
 
 Note: `docs/plans/` is a local process-document directory for requirement exploration, design drafts, implementation plans, and acceptance evidence. It is not published with the public source repository by default. The public Roadmap records only the feature pool, priority, and implementation status.
 

@@ -40,10 +40,14 @@ async function newestWindowsInstaller() {
   return newestByExtension(resolve(root, 'src-tauri/target/release/bundle/nsis'), '.exe')
 }
 
-async function copyIfPresent(source, target, assets, label) {
+async function copyJsonIfPresent(source, target, assets, label, version) {
   if (!await exists(source)) {
     assets.push({ label, status: 'missing', asset: basename(target) })
     return
+  }
+  const json = JSON.parse(await readFile(source, 'utf8'))
+  if (json.application?.version !== version) {
+    throw new Error(`${label} 版本不一致：expected ${version}, got ${json.application?.version ?? 'unknown'}`)
   }
   await copyFile(source, target)
   assets.push({ label, status: 'present', asset: basename(target), sha256: await sha256(target) })
@@ -89,23 +93,26 @@ if (windowsInstaller === null) {
   await copyFile(windowsInstaller, target)
   assets.push({ label: 'windows-nsis', status: 'present', asset: basename(target), sha256: await sha256(target) })
 }
-await copyIfPresent(
+await copyJsonIfPresent(
   resolve(argValue('--license-inventory', resolve(root, 'runtime/staging/license-inventory.json'))),
   resolve(outputDirectory, `deepshell-agent-v${version}-license-inventory.json`),
   assets,
-  'license-inventory'
+  'license-inventory',
+  version
 )
-await copyIfPresent(
+await copyJsonIfPresent(
   resolve(argValue('--sbom', resolve(root, 'runtime/staging/sbom.json'))),
   resolve(outputDirectory, `deepshell-agent-v${version}-sbom.json`),
   assets,
-  'sbom'
+  'sbom',
+  version
 )
-await copyIfPresent(
+await copyJsonIfPresent(
   resolve(argValue('--package-report', resolve(outputDirectory, 'package-report.json'))),
   resolve(outputDirectory, `deepshell-agent-v${version}-package-report.json`),
   assets,
-  'package-report'
+  'package-report',
+  version
 )
 
 const presentAssets = assets.filter(asset => asset.status === 'present')

@@ -69,12 +69,13 @@ async function runAudit(label, command, args, options = {}) {
 
 const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
+const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm'
 const audits = [
   await runAudit('node-root-production', pnpm, ['audit', '--prod', '--json'], { cwd: root }),
   await runAudit('node-root-all', pnpm, ['audit', '--json'], { cwd: root }),
 ]
 if (await exists(resolve(root, 'runtime/manifest/dsh-install/package-lock.json'))) {
-  audits.push(await runAudit('dsh-runtime', 'npm', ['audit', '--json', '--omit', 'dev'], { cwd: resolve(root, 'runtime/manifest/dsh-install') }))
+  audits.push(await runAudit('dsh-runtime', npm, ['audit', '--json', '--omit', 'dev'], { cwd: resolve(root, 'runtime/manifest/dsh-install') }))
 } else {
   audits.push({ label: 'dsh-runtime', status: 'missing-lockfile' })
 }

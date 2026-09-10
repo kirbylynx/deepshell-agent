@@ -57,8 +57,10 @@ describe('v0.1.1 release hardening scripts', () => {
       await writeFile(resolve(profile, 'profile.txt'), 'profile')
       const dmg = resolve(temporary, 'fixture.dmg')
       const windowsInstaller = resolve(temporary, 'fixture.exe')
+      const license = resolve(temporary, 'license-inventory.json')
       await writeFile(dmg, 'dmg')
       await writeFile(windowsInstaller, 'windows')
+      await writeFile(license, '{"application":{"version":"0.1.1-test"}}\n')
       const output = resolve(temporary, 'release')
 
       await runNode([
@@ -70,7 +72,8 @@ describe('v0.1.1 release hardening scripts', () => {
         '--windows-installer', windowsInstaller,
         '--runtime-node', node,
         '--runtime-dsh', dsh,
-        '--profile-template', profile
+        '--profile-template', profile,
+        '--license-inventory', license
       ])
 
       const reportText = await readFile(resolve(output, 'package-report.json'), 'utf8')
@@ -96,9 +99,9 @@ describe('v0.1.1 release hardening scripts', () => {
       const output = resolve(temporary, 'release')
       await writeFile(dmg, 'dmg')
       await writeFile(windowsInstaller, 'windows')
-      await writeFile(license, '{"license":true}\n')
-      await writeFile(sbom, '{"sbom":true}\n')
-      await writeFile(report, '{"report":true}\n')
+      await writeFile(license, '{"application":{"version":"0.1.1-test"}}\n')
+      await writeFile(sbom, '{"application":{"version":"0.1.1-test"}}\n')
+      await writeFile(report, '{"application":{"version":"0.1.1-test"}}\n')
 
       await runNode([
         'scripts/release-staging.mjs',
@@ -124,20 +127,52 @@ describe('v0.1.1 release hardening scripts', () => {
     }
   })
 
+  it('release staging 拒绝版本不一致的支持资产', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-mismatch-'))
+    try {
+      const dmg = resolve(temporary, 'source.dmg')
+      const license = resolve(temporary, 'license.json')
+      const sbom = resolve(temporary, 'sbom.json')
+      const report = resolve(temporary, 'package-report.json')
+      const output = resolve(temporary, 'release')
+      await writeFile(dmg, 'dmg')
+      await writeFile(license, '{"application":{"version":"0.1.0"}}\n')
+      await writeFile(sbom, '{"application":{"version":"0.1.1-test"}}\n')
+      await writeFile(report, '{"application":{"version":"0.1.1-test"}}\n')
+
+      await expect(runNode([
+        'scripts/release-staging.mjs',
+        '--version', '0.1.1-test',
+        '--output-dir', output,
+        '--dmg', dmg,
+        '--license-inventory', license,
+        '--sbom', sbom,
+        '--package-report', report
+      ])).rejects.toThrow()
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
   it('从 license inventory 派生 SBOM baseline', async () => {
-    const staging = resolve(root, 'runtime/staging')
-    await mkdir(staging, { recursive: true })
-    await writeFile(resolve(staging, 'license-inventory.json'), JSON.stringify({
-      application: { name: 'DeepShell Agent', version: '0.1.1-test' },
-      bundledNode: { version: '24.20.0' },
-      bundledDshNpmPackages: [{ name: '@deepseek-ai/dsh', version: '0.1.2-rc.1', license: 'MIT', installed: true }],
-      directBuildAndTestNpmPackages: [],
-      rustRegistryPackages: []
-    }))
-    await runNode(['scripts/generate-sbom.mjs'])
-    const sbom = JSON.parse(await readFile(resolve(staging, 'sbom.json'), 'utf8'))
-    expect(sbom.format).toBe('deepshell-sbom-baseline')
-    expect(sbom.components.some((component: { name: string }) => component.name === '@deepseek-ai/dsh')).toBe(true)
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-sbom-'))
+    try {
+      const inventory = resolve(temporary, 'license-inventory.json')
+      const output = resolve(temporary, 'sbom.json')
+      await writeFile(inventory, JSON.stringify({
+        application: { name: 'DeepShell Agent', version: '0.1.1-test' },
+        bundledNode: { version: '24.20.0' },
+        bundledDshNpmPackages: [{ name: '@deepseek-ai/dsh', version: '0.1.2-rc.1', license: 'MIT', installed: true }],
+        directBuildAndTestNpmPackages: [],
+        rustRegistryPackages: []
+      }))
+      await runNode(['scripts/generate-sbom.mjs', '--input', inventory, '--output', output, '--expected-version', '0.1.1-test'])
+      const sbom = JSON.parse(await readFile(output, 'utf8'))
+      expect(sbom.format).toBe('deepshell-sbom-baseline')
+      expect(sbom.components.some((component: { name: string }) => component.name === '@deepseek-ai/dsh')).toBe(true)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
   })
 
   it('security audit dry-run 和 Windows route check 不产生伪通过', async () => {
@@ -147,8 +182,9 @@ describe('v0.1.1 release hardening scripts', () => {
     const windows = JSON.parse(await readFile(resolve(root, 'runtime/staging/windows-route-check.json'), 'utf8'))
     expect(audit.audits.every((item: { status: string }) => item.status === 'dry-run' || item.status === 'missing-runtime')).toBe(true)
     if (process.platform !== 'win32') {
-      expect(windows.status).toBe('unable-current-platform')
+      expect(windows.status).toBe('route-documented-current-platform-unable')
       expect(windows.validationPolicy).toContain('never count as Windows installer pass')
+      expect(windows.checks.msvc.status).toBe('not-checked-current-platform')
     }
   })
 })

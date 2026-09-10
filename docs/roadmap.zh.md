@@ -6,9 +6,9 @@
 >
 > **Tagline:** A desktop agent powered by DeepSeek Harness.
 >
-> **状态：** 功能池、优先级、实现状态与当前活跃版本规划基线；`v0.0.1` POC 已完成可行性验证，`v0.1.0` MVP 已落地项已标注，选定的 `v0.1.1` 项已标为待实现
+> **状态：** 功能池、优先级、实现状态与发布规划基线；`v0.0.1` POC 已完成可行性验证，`v0.1.0` MVP 已落地项已标注，选定的 `v0.1.1` 发布硬化项已落地
 >
-> **日期：** 2026-09-06
+> **日期：** 2026-09-10
 
 ## 1. 文档目的
 
@@ -19,6 +19,7 @@
 - [`docs/architecture.zh.md`](architecture.zh.md)
 - [`docs/releases/v0.0.1.zh.md`](releases/v0.0.1.zh.md)
 - [`docs/releases/v0.1.0.zh.md`](releases/v0.1.0.zh.md)
+- [`docs/releases/v0.1.1.zh.md`](releases/v0.1.1.zh.md)
 
 说明：`docs/plans/` 是本地过程文档目录，用于需求推演、设计草案、实施计划和验收证据整理，默认不随公开源码仓库发布。公开仓库中的 Roadmap 只记录功能池、优先级和实现状态。
 
