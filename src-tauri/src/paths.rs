@@ -92,7 +92,10 @@ impl AppPaths {
                 "DSH Session 目录必须是真实目录，不能是符号链接",
             ));
         }
-        if !directory_has_entries(&sessions)? || self.current_upgrade_backup_exists()? {
+        if !directory_has_entries(&sessions)?
+            || !self.installed_profile_matches_previous_runtime()?
+            || self.current_upgrade_backup_exists()?
+        {
             self.prune_session_backups()?;
             return Ok(());
         }
@@ -131,6 +134,32 @@ impl AppPaths {
         self.prune_session_backups()?;
         let _ = logging::record(&self.logs, "info", "session_upgrade_backup_created", None);
         Ok(())
+    }
+
+    fn installed_profile_matches_previous_runtime(&self) -> Result<bool, AppError> {
+        let manifest_path = self.dsh_home.join("template-manifest.json");
+        let manifest_metadata = match fs::symlink_metadata(&manifest_path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => return Err(runtime_error(error)),
+        };
+        if manifest_metadata.file_type().is_symlink() || !manifest_metadata.is_file() {
+            return Err(AppError::new(
+                ErrorCode::RuntimeUnavailable,
+                "已安装 Profile manifest 必须是真实文件，不能是符号链接",
+            ));
+        }
+        let manifest = fs::read_to_string(manifest_path).map_err(runtime_error)?;
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&manifest) else {
+            return Ok(false);
+        };
+        let dsh_matches = value.get("dshVersion").and_then(|field| field.as_str())
+            == Some(PREVIOUS_DSH_VERSION_FOR_SESSION_BACKUP);
+        let bundle_matches = value
+            .get("desktopBundleVersion")
+            .and_then(|field| field.as_str())
+            == Some(PREVIOUS_APPLICATION_VERSION_FOR_SESSION_BACKUP);
+        Ok(dsh_matches || bundle_matches)
     }
 
     fn current_upgrade_backup_exists(&self) -> Result<bool, AppError> {
@@ -606,6 +635,21 @@ mod tests {
         entries
     }
 
+    fn write_installed_manifest(paths: &AppPaths, dsh_version: &str, bundle_version: &str) {
+        fs::write(
+            paths.dsh_home.join("template-manifest.json"),
+            format!(
+                r#"{{
+  "schemaVersion": 1,
+  "dshVersion": "{dsh_version}",
+  "desktopBundleVersion": "{bundle_version}"
+}}
+"#
+            ),
+        )
+        .unwrap();
+    }
+
     #[test]
     fn profile_upgrade_preserves_unowned_data() {
         let temporary = tempfile::tempdir().unwrap();
@@ -726,6 +770,11 @@ mod tests {
             .join("sessions/workspace-a/session-a/session.v2.jsonl");
         fs::create_dir_all(session_file.parent().unwrap()).unwrap();
         fs::write(&session_file, "{\"type\":\"session\"}\n").unwrap();
+        write_installed_manifest(
+            &paths,
+            PREVIOUS_DSH_VERSION_FOR_SESSION_BACKUP,
+            PREVIOUS_APPLICATION_VERSION_FOR_SESSION_BACKUP,
+        );
         let workspace_secret = paths.workspace.join("workspace-secret.txt");
         fs::write(&workspace_secret, "do-not-copy").unwrap();
 
@@ -765,6 +814,33 @@ mod tests {
 
         paths.prepare().unwrap();
         assert_eq!(backup_directories(&paths.session_backups).len(), 1);
+    }
+
+    #[test]
+    fn skips_session_backup_when_profile_is_already_current() {
+        let temporary = tempfile::tempdir().unwrap();
+        let resources = temporary.path().join("resources");
+        create_minimal_runtime(&resources);
+        let paths = AppPaths::new(temporary.path().join("data"), resources).unwrap();
+        paths.prepare().unwrap();
+        let session_file = paths
+            .dsh_home
+            .join("sessions/workspace-a/session-a/session.v3.jsonl");
+        fs::create_dir_all(session_file.parent().unwrap()).unwrap();
+        fs::write(&session_file, "{\"type\":\"session\"}\n").unwrap();
+        write_installed_manifest(
+            &paths,
+            TARGET_DSH_VERSION_FOR_SESSION_BACKUP,
+            env!("CARGO_PKG_VERSION"),
+        );
+
+        paths.prepare().unwrap();
+
+        assert!(backup_directories(&paths.session_backups).is_empty());
+        assert!(paths
+            .dsh_home
+            .join("sessions/workspace-a/session-a/session.v3.jsonl")
+            .is_file());
     }
 
     #[test]
@@ -811,6 +887,11 @@ mod tests {
             sessions.join("invalid-symlink"),
         )
         .unwrap();
+        write_installed_manifest(
+            &paths,
+            PREVIOUS_DSH_VERSION_FOR_SESSION_BACKUP,
+            PREVIOUS_APPLICATION_VERSION_FOR_SESSION_BACKUP,
+        );
 
         assert!(paths.backup_sessions_before_upgrade().is_err());
         assert!(sessions.join("session.v2.jsonl").is_file());

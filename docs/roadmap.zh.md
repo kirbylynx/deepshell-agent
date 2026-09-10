@@ -195,7 +195,8 @@
 | SESSION-018 | Delete | 删除 Session 数据并提供明确确认 | P2 | 未开始 |
 | SESSION-019 | Session 导出 | 导出可审计的会话与运行记录 | P2 | 未开始 |
 | SESSION-020 | 多机 Session 同步 | 在设备之间同步和恢复 Session | P3 | 未开始 |
-| SESSION-021 | DSH Session format V3 迁移保护 | DSH runtime refresh 后验证旧 Session 可读/可迁移、不可降级行为和失败安全提示 | P0 | 已实现（v0.1.2） |
+| SESSION-021 | DSH Session format V3 迁移保护 | 通过有限升级前 Session 备份、不可降级提示和失败安全信息保护 DSH runtime refresh | P0 | 已实现（v0.1.2） |
+| SESSION-022 | 真实旧 Session 升级验收 | tag/release 发布前，手工验证代表性的 `v0.1.1` Session 可在 `v0.1.2` 下打开或正确迁移 | P0 | 未开始 |
 
 ### 4.7 Workspace、文件、Shell 与 Git
 
