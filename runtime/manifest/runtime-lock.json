@@ -1,7 +1,7 @@
 {
   "$schema": "./runtime-lock.schema.json",
   "schemaVersion": 1,
-  "applicationVersion": "0.1.1",
+  "applicationVersion": "0.1.2",
   "platforms": ["darwin-arm64", "win32-x64"],
   "node": {
     "version": "24.20.0",
@@ -22,9 +22,9 @@
   },
   "dsh": {
     "package": "@deepseek-ai/dsh",
-    "version": "0.1.2-rc.1",
-    "integrity": "sha512-RPq48TzxvwpdT9/7W1tbhZDBMmeK+bxDrX9cqQC27Wx/LqtgJF8PSa3b3xriU8oxtvhwYmk21w2cej3uMQrnVA==",
-    "shasum": "fef213043313affc36ca2226d2637ad483b5e3f6",
+    "version": "0.1.5-rc.1",
+    "integrity": "sha512-rmNmzQCg3oIc1z8xH7izRSOuy1TNzq+/NILyfM+7e8DKOyV+yBtg47WEsqR2SiIe1ATec3L/rUa1YhIcfQ2XEg==",
+    "shasum": "6bcdb554bf2eef837666e37f5bd5fa494eb053e4",
     "entry": "node_modules/@deepseek-ai/dsh/lib/bin.js",
     "profile": "web",
     "desktopBundle": "@deepshell-agent/dsh-desktop"

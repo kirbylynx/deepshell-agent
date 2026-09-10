@@ -12,7 +12,7 @@ DeepShell Agent does not reimplement the Agent Runtime and does not fork the off
 
 ## Current status
 
-The current source baseline is `v0.1.1`, a release-hardening update on top of the `v0.1.0` MVP (Minimum Viable Product). A macOS arm64 developer-preview DMG is published from this baseline as a GitHub prerelease.
+The current source baseline is `v0.1.2`, a DSH runtime-refresh update on top of the `v0.1.1` release-hardening baseline. It upgrades the pinned DeepSeek Harness runtime to `0.1.5-rc.1`, keeps the official Web UI / public extension-point architecture unchanged, and adds a bounded pre-upgrade backup guard for DSH Session data.
 
 Capabilities already included in the source baseline:
 
@@ -27,7 +27,9 @@ Capabilities already included in the source baseline:
 - official `workspace-write` Permission Preset;
 - official `credentials-local` credential scheme;
 - DeepSeek Web Search and public HTTP(S) Web Fetch;
+- DeepSeek `deepseek-flash` / `DeepSeek-V41-Flash` catalog compatibility through the upstream DSH DeepSeek adapter;
 - Sidecar dynamic port, token cleanup, Ready Gate, process cleanup, and basic recovery;
+- bounded local pre-upgrade backup of `dsh-home/sessions` during the `v0.1.1` to `v0.1.2` runtime refresh;
 - redacted local diagnostics, package-size reporting, SBOM baseline, vulnerability-audit entrypoint, and release staging automation;
 - E2E/Release artifact security-boundary comparison.
 
@@ -47,7 +49,7 @@ Coding Mode targets code workspaces. It reuses DSH file, search, Shell, test, Gi
 
 ### General Mode
 
-General Mode provides a general-purpose Agent entry for Q&A, local tasks, and lightweight research. In `v0.1.1`, it is implemented as the `deepshell-general` Agent Preset and uses the official DSH Agent Preset UI.
+General Mode provides a general-purpose Agent entry for Q&A, local tasks, and lightweight research. It is implemented as the `deepshell-general` Agent Preset and uses the official DSH Agent Preset UI.
 
 ### Work Mode
 
@@ -73,7 +75,7 @@ Models, routes, base URLs, API keys, and model lists are managed through the off
 
 ## Getting and running
 
-For `v0.1.1`, macOS arm64 users can download the developer-preview DMG from GitHub Releases. Formal signed/notarized packages and Windows packages are still separate release gates.
+For published binaries, macOS arm64 users can download developer-preview DMGs from GitHub Releases. Formal signed/notarized packages and Windows packages are still separate release gates.
 
 The current source baseline has not completed all formal binary-distribution gates. The public repository is primarily for source publication, architecture review, and reproducible builds. If you want to build from source, see “For contributors” below.
 
@@ -84,9 +86,9 @@ Target platform:
 - Apple Silicon Mac;
 - macOS 13.0 or later.
 
-For `v0.1.1`, macOS users may download the developer-preview `.dmg`, drag `DeepShell Agent.app` into Applications, and launch it from there.
+For published macOS developer-preview builds, users may download the `.dmg`, drag `DeepShell Agent.app` into Applications, and launch it from there.
 
-The `v0.1.1` developer-preview DMG is locally signed for packaging, but it has not completed Developer ID signing or Apple notarization. macOS may show the usual security warning for non-notarized apps. Signing, notarization, and Gatekeeper verification are required before formal public binary distribution.
+Developer-preview DMGs are locally signed for packaging, but they have not completed Developer ID signing or Apple notarization. macOS may show the usual security warning for non-notarized apps. Signing, notarization, and Gatekeeper verification are required before formal public binary distribution.
 
 ### Windows users
 
@@ -149,6 +151,7 @@ Third-party dependencies, bundled runtime components, and binary-release compone
 - [v0.0.1 POC Closeout](docs/releases/v0.0.1.md) ([中文](docs/releases/v0.0.1.zh.md))
 - [v0.1.0 MVP Closeout](docs/releases/v0.1.0.md) ([中文](docs/releases/v0.1.0.zh.md))
 - [v0.1.1 Release-Hardening Closeout](docs/releases/v0.1.1.md) ([中文](docs/releases/v0.1.1.zh.md))
+- [v0.1.2 DSH Runtime Refresh Closeout](docs/releases/v0.1.2.md) ([中文](docs/releases/v0.1.2.zh.md))
 
 `docs/plans/` is a local process-document directory for requirement exploration, design drafts, implementation plans, and acceptance evidence. It is not published with the public source repository by default.
 
@@ -184,7 +187,7 @@ The following sections are for contributors who build, develop, and validate Dee
 - Desktop Shell: Tauri 2 + Rust
 - Web Bootstrap: Vite + TypeScript
 - UI Runtime: official DSH React Web UI
-- Agent Runtime: DeepSeek Harness `0.1.2-rc.1`
+- Agent Runtime: DeepSeek Harness `0.1.5-rc.1`
 - Bundled Node.js: Node.js `24.20.0`
 - Package Manager: pnpm `10.30.2`
 - Test: Rust test, Vitest, WebdriverIO/Tauri E2E

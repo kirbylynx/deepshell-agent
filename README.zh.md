@@ -12,7 +12,7 @@ DeepShell Agent 不重新实现 Agent Runtime，也不 fork 官方 DSH Web UI。
 
 ## 当前状态
 
-当前源码基线版本为基于 `v0.1.0` MVP（Minimum Viable Product，最小可用版本）的 `v0.1.1` 发布硬化版本。基于该基线发布 macOS arm64 developer-preview DMG，并以 GitHub prerelease 形式提供。
+当前源码基线版本为 `v0.1.2`，是在 `v0.1.1` 发布硬化基线上的 DSH runtime refresh（运行时刷新）版本。它将固定的 DeepSeek Harness runtime 升级到 `0.1.5-rc.1`，保持官方 Web UI / 官方扩展点架构不变，并为 DSH Session 数据增加有限的升级前备份保护。
 
 已经纳入源码基线的能力：
 
@@ -27,7 +27,9 @@ DeepShell Agent 不重新实现 Agent Runtime，也不 fork 官方 DSH Web UI。
 - 官方 `workspace-write` Permission Preset；
 - 官方 `credentials-local` 凭据方案；
 - DeepSeek Web Search 与公共 HTTP(S) Web Fetch；
+- 通过上游 DSH DeepSeek adapter 兼容 DeepSeek `deepseek-flash` / `DeepSeek-V41-Flash` 模型目录；
 - Sidecar 动态端口、token 清理、Ready Gate、进程清理和基础恢复；
+- `v0.1.1` 到 `v0.1.2` runtime refresh 期间，对 `dsh-home/sessions` 做有限本地升级前备份；
 - 本地脱敏诊断包、包体积报告、SBOM 基线、漏洞扫描入口和 release staging 自动化；
 - E2E/Release 产物安全边界比较。
 
@@ -47,7 +49,7 @@ Coding Mode 面向代码 Workspace，复用 DSH 的文件、搜索、Shell、测
 
 ### General Mode
 
-General Mode 提供通用问答、本地任务和轻量研究入口。`v0.1.1` 中它以 `deepshell-general` Agent Preset 形式落地，并复用官方 DSH Agent Preset UI。
+General Mode 提供通用问答、本地任务和轻量研究入口。它以 `deepshell-general` Agent Preset 形式落地，并复用官方 DSH Agent Preset UI。
 
 ### Work Mode
 
@@ -73,7 +75,7 @@ Office/PDF/PPTX/XLSX 原生解析、复杂知识库、企业 Connector 和专属
 
 ## 获取与运行
 
-`v0.1.1` 阶段，macOS arm64 用户可以从 GitHub Releases 下载 developer-preview DMG。正式签名/公证包和 Windows 包仍是独立发布门禁。
+对于已发布的二进制包，macOS arm64 用户可以从 GitHub Releases 下载 developer-preview DMG。正式签名/公证包和 Windows 包仍是独立发布门禁。
 
 当前源码基线的正式二进制分发门禁尚未全部完成，因此 public repository 主要用于源码公开、架构审查和可复现构建。若你从源码自行构建，请参考本文最后的 “For contributors” 章节。
 
@@ -84,9 +86,9 @@ Office/PDF/PPTX/XLSX 原生解析、复杂知识库、企业 Connector 和专属
 - Apple Silicon Mac；
 - macOS 13.0 或更高版本。
 
-`v0.1.1` 阶段，macOS 用户可下载 developer-preview `.dmg`，将 `DeepShell Agent.app` 拖入 Applications 后启动。
+对于已发布的 macOS developer-preview 构建，用户可下载 `.dmg`，将 `DeepShell Agent.app` 拖入 Applications 后启动。
 
-`v0.1.1` developer-preview DMG 已为打包流程做本地签名，但尚未完成 Developer ID 签名和 Apple notarization。macOS 可能显示非 notarized 应用的常规安全提示。正式公开二进制分发前，需要补齐签名、公证和 Gatekeeper 验证。
+Developer-preview DMG 已为打包流程做本地签名，但尚未完成 Developer ID 签名和 Apple notarization。macOS 可能显示非 notarized 应用的常规安全提示。正式公开二进制分发前，需要补齐签名、公证和 Gatekeeper 验证。
 
 ### Windows 用户
 
@@ -149,6 +151,7 @@ DeepShell Agent 源码以 MIT License 发布，详见 [LICENSE](LICENSE)。
 - [v0.0.1 POC 收口](docs/releases/v0.0.1.zh.md)
 - [v0.1.0 MVP 收口](docs/releases/v0.1.0.zh.md)
 - [v0.1.1 发布硬化收口](docs/releases/v0.1.1.zh.md)
+- [v0.1.2 DSH Runtime Refresh 收口](docs/releases/v0.1.2.zh.md)
 
 `docs/plans/` 是本地过程文档目录，用于需求推演、设计草案、实施计划和验收证据整理，默认不随公开源码仓库发布。
 
@@ -184,7 +187,7 @@ DeepShell Agent 是基于 DeepSeek Harness 构建的独立桌面 Agent 产品。
 - Desktop Shell：Tauri 2 + Rust
 - Web Bootstrap：Vite + TypeScript
 - UI Runtime：官方 DSH React Web UI
-- Agent Runtime：DeepSeek Harness `0.1.2-rc.1`
+- Agent Runtime：DeepSeek Harness `0.1.5-rc.1`
 - Bundled Node.js：Node.js `24.20.0`
 - Package Manager：pnpm `10.30.2`
 - Test：Rust test、Vitest、WebdriverIO/Tauri E2E

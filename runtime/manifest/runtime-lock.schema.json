@@ -4,7 +4,7 @@
   "required": ["schemaVersion", "applicationVersion", "platforms", "node", "dsh", "tooling", "security"],
   "properties": {
     "schemaVersion": { "const": 1 },
-    "applicationVersion": { "const": "0.1.1" },
+    "applicationVersion": { "const": "0.1.2" },
     "platforms": {
       "type": "array",
       "items": { "enum": ["darwin-arm64", "win32-x64"] },

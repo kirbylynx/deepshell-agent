@@ -50,7 +50,7 @@ pub fn record_with_instance(
         event,
         app_version: env!("CARGO_PKG_VERSION"),
         node_version: "24.20.0",
-        dsh_version: "0.1.2-rc.1",
+        dsh_version: "0.1.5-rc.1",
         sidecar_instance_id,
         error_code: error_code.map(|code| code.to_string()),
     };
@@ -97,7 +97,7 @@ mod tests {
         .unwrap();
         let path = temporary.path().join("app.jsonl");
         let text = fs::read_to_string(&path).unwrap();
-        assert!(text.contains("\"appVersion\":\"0.1.1\""));
+        assert!(text.contains("\"appVersion\":\"0.1.2\""));
         assert!(text.contains("\"errorCode\":\"runtime_start_failed\""));
         #[cfg(unix)]
         assert_eq!(

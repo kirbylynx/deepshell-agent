@@ -79,7 +79,7 @@ pub fn run() {
                 .name(Some("DeepShell Agent"))
                 .version(Some(env!("CARGO_PKG_VERSION")))
                 .credits(Some(
-                    "A desktop agent powered by DeepSeek Harness.\nNode.js 24.20.0\nDeepSeek Harness 0.1.2-rc.1",
+                    "A desktop agent powered by DeepSeek Harness.\nNode.js 24.20.0\nDeepSeek Harness 0.1.5-rc.1",
                 ))
                 .build();
             let application_menu = Submenu::with_items(

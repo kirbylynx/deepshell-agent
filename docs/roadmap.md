@@ -6,7 +6,7 @@ Language: English | [简体中文](roadmap.zh.md)
 >
 > **Tagline:** A desktop agent powered by DeepSeek Harness.
 >
-> **Status:** Feature pool, priority, implementation status, and release-planning baseline; `v0.0.1` POC has completed feasibility validation, `v0.1.0` MVP items are marked, selected `v0.1.1` release-hardening items have landed, and selected `v0.1.2` DSH runtime-refresh items are planned.
+> **Status:** Feature pool, priority, implementation status, and release-planning baseline; `v0.0.1` POC has completed feasibility validation, `v0.1.0` MVP items are marked, selected `v0.1.1` release-hardening items have landed, and selected `v0.1.2` DSH runtime-refresh items have landed in the current source baseline.
 >
 > **Date:** 2026-09-10
 
@@ -20,6 +20,7 @@ Public architecture, release closeout, and feature status are documented in:
 - [`docs/releases/v0.0.1.md`](releases/v0.0.1.md)
 - [`docs/releases/v0.1.0.md`](releases/v0.1.0.md)
 - [`docs/releases/v0.1.1.md`](releases/v0.1.1.md)
+- [`docs/releases/v0.1.2.md`](releases/v0.1.2.md)
 
 Note: `docs/plans/` is a local process-document directory for requirement exploration, design drafts, implementation plans, and acceptance evidence. It is not published with the public source repository by default. The public Roadmap records only the feature pool, priority, and implementation status.
 
@@ -58,6 +59,7 @@ The Status column records current implementation facts and confirmed active-vers
 
 - `Implemented (v0.1.0)` means the feature has landed in the `v0.1.0` MVP and is part of the current validation baseline.
 - `Implemented (v0.1.1)` means the feature has landed in the `v0.1.1` release-hardening baseline and is covered by the current validation scope.
+- `Implemented (v0.1.2)` means the feature has landed in the `v0.1.2` DSH runtime-refresh baseline and is covered by the current validation scope.
 - `Planned (v0.1.1)` means the feature is selected for the active `v0.1.1` planning/development branch, but has not yet landed as an implemented feature.
 - `Planned (v0.1.2)` means the feature is selected for the active `v0.1.2` DSH runtime-refresh branch, but has not yet landed as an implemented feature.
 - `Not started` means the Roadmap item has not landed as a complete feature. If a composite item is only partially complete, it is still treated as not fully implemented.
@@ -130,7 +132,7 @@ The Status column records current implementation facts and confirmed active-vers
 | EXT-009 | Plugin signing and source verification | Verify publisher, integrity, and version source | P3 | Not started |
 | EXT-010 | Agent Mode Marketplace | Distribute user-facing mode bundles | P3 | Not started |
 | EXT-011 | Complex Profile/Mode inheritance | Resolve versions, dependencies, inheritance, and conflicts | P3 | Not started |
-| EXT-012 | DSH 0.1.5 Plugin API compatibility | Keep DeepShell first-party Client/UI and Bundle integration compatible with upstream DSH 0.1.5 public extension contracts | P0 | Planned (v0.1.2) |
+| EXT-012 | DSH 0.1.5 Plugin API compatibility | Keep DeepShell first-party Client/UI and Bundle integration compatible with upstream DSH 0.1.5 public extension contracts | P0 | Implemented (v0.1.2) |
 
 ### 4.4 Models and credentials
 
@@ -144,7 +146,7 @@ The Status column records current implementation facts and confirmed active-vers
 | MODEL-006 | Custom Provider | Configure OpenAI-compatible and similar custom endpoints | P2 | Implemented (v0.1.0) |
 | MODEL-007 | Model selection | Select and persist model facts per Session | P1 | Implemented (v0.1.0) |
 | MODEL-008 | Provider availability status | Distinguish unconfigured, authentication failure, and service unavailable | P1 | Implemented (v0.1.0) |
-| MODEL-009 | DeepSeek-V4.1-Flash compatibility | Adopt the upstream DeepSeek adapter/catalog behavior for `DeepSeek-V41-Flash` / `deepseek-flash`, including capability and default-model verification | P0 | Planned (v0.1.2) |
+| MODEL-009 | DeepSeek-V4.1-Flash compatibility | Adopt the upstream DeepSeek adapter/catalog behavior for `DeepSeek-V41-Flash` / `deepseek-flash`, including capability and default-model verification | P0 | Implemented (v0.1.2) |
 | CRED-001 | DSH credentials-local | Credential Reference and write-only Secret configuration | P0 | Implemented (v0.1.0) |
 | CRED-002 | Secret redaction | Secrets do not enter Sessions, logs, or diagnostic bundles | P0 | Implemented (v0.1.0) |
 | CRED-003 | macOS Keychain Provider | System credential Provider following the DSH contract | P2 | Not started |
@@ -193,7 +195,7 @@ The Status column records current implementation facts and confirmed active-vers
 | SESSION-018 | Delete | Delete Session data with explicit confirmation | P2 | Not started |
 | SESSION-019 | Session export | Export auditable conversation and run records | P2 | Not started |
 | SESSION-020 | Cross-device Session sync | Sync and restore Sessions across devices | P3 | Not started |
-| SESSION-021 | DSH Session format V3 migration guard | Verify old Session readability/migration, non-downgrade behavior, and failure-safe user messaging after the DSH runtime refresh | P0 | Planned (v0.1.2) |
+| SESSION-021 | DSH Session format V3 migration guard | Verify old Session readability/migration, non-downgrade behavior, and failure-safe user messaging after the DSH runtime refresh | P0 | Implemented (v0.1.2) |
 
 ### 4.7 Workspace, files, Shell, and Git
 
@@ -318,7 +320,7 @@ The Status column records current implementation facts and confirmed active-vers
 | OPS-007 | Diagnostic bundle | User-previewable, redacted diagnostic export | P1 | Implemented (v0.1.1) |
 | OPS-008 | Performance observability | Startup, memory, package size, and runtime duration | P1 | Implemented (v0.1.1) |
 | OPS-009 | Configuration and data migration | Idempotent upgrades with readability verification | P1 | Implemented (v0.1.0) |
-| OPS-010 | Pre-upgrade backup and recovery | Limited backups, fail-stop, and recovery instructions | P1 | Planned (v0.1.2) |
+| OPS-010 | Pre-upgrade backup and recovery | Limited backups, fail-stop, and recovery instructions | P1 | Implemented (v0.1.2) |
 | OPS-011 | Data cleanup | Explicitly clear Sessions, cache, or all app data | P2 | Not started |
 | OPS-012 | Uninstall data-retention policy | Retain by default and provide an explicit cleanup method | P2 | Not started |
 | OPS-013 | Opt-in telemetry | Product metrics actively enabled by the user | P3 | Not started |
@@ -346,7 +348,7 @@ The Status column records current implementation facts and confirmed active-vers
 | REL-016 | Release staging automation | Prepare public release assets, checksums, license inventory, SBOM/report references, and release notes drafts without publishing | P1 | Implemented (v0.1.1) |
 | REL-017 | Windows x64 installer validation | Validate the actual NSIS installer, WebView2 first run, Session creation, shutdown cleanup, and uninstall behavior on real Windows or CI | P1 | Not started |
 | REL-018 | Signed binary distribution | Publish signed/notarized platform installers for general users | P1 | Not started |
-| REL-019 | DSH runtime refresh to 0.1.5 | Atomically upgrade pinned DSH runtime, lockfiles, profile, first-party Bundle compatibility, release artifacts, and public docs to the upstream DSH 0.1.5 compatibility set | P0 | Planned (v0.1.2) |
+| REL-019 | DSH runtime refresh to 0.1.5 | Atomically upgrade pinned DSH runtime, lockfiles, profile, first-party Bundle compatibility, release artifacts, and public docs to the upstream DSH 0.1.5 compatibility set | P0 | Implemented (v0.1.2) |
 
 ### 4.15 Testing and quality assurance
 
@@ -359,7 +361,7 @@ The Status column records current implementation facts and confirmed active-vers
 | QA-005 | Security Tests | Origin/Auth, CSP, XSS, paths, and secrets | P0 | Implemented (v0.1.0) |
 | QA-006 | Packaging Tests | Run installed artifacts without development dependencies | P0 | Implemented (v0.1.0) |
 | QA-007 | Crash Recovery Tests | Sidecar and Tool child-process abnormal scenarios | P0 | Implemented (v0.1.0) |
-| QA-008 | DSH Upgrade Regression | Run fixed regression checklist for every upstream upgrade | P1 | Planned (v0.1.2) |
+| QA-008 | DSH Upgrade Regression | Run fixed regression checklist for every upstream upgrade | P1 | Implemented (v0.1.2) |
 | QA-009 | Document Parser Tests | Format, provenance, resource limits, and malicious files | P1 | Not started |
 | QA-010 | MCP Failure Isolation | Server crash, timeout, and protocol errors | P1 | Not started |
 | QA-011 | Performance Regression | Startup, memory, package size, and response trends | P2 | Not started |

@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { readdir, readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
@@ -7,7 +7,7 @@ const root = resolve(import.meta.dirname, '../..')
 describe('DSH 上游边界', () => {
   it('固定官方 npm 包且不导入私有源码路径', async () => {
     const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
-    expect(pkg.devDependencies['@deepseek-ai/dsh']).toBe('0.1.2-rc.1')
+    expect(pkg.devDependencies['@deepseek-ai/dsh']).toBe('0.1.5-rc.1')
     const client = await readFile(resolve(root, 'dsh/bundles/deepshell-desktop/lib/client.js'), 'utf8')
     expect(client).not.toMatch(/@deepseek-ai\/.*\/src\//)
   })
@@ -45,12 +45,36 @@ describe('DSH 上游边界', () => {
       root,
       'runtime/dsh/node_modules/@deepseek-ai/dsh-subprocess-local/lib/index.js'
     ), 'utf8')
+    const subprocessLib = resolve(root, 'runtime/dsh/node_modules/@deepseek-ai/dsh-subprocess-local/lib')
+    const subprocessChunks = await Promise.all(
+      (await readdir(subprocessLib))
+        .filter(file => file.endsWith('.js'))
+        .map(async file => readFile(resolve(subprocessLib, file), 'utf8'))
+    )
     const processTree = await readFile(resolve(root, 'src-tauri/src/sidecar/process_tree.rs'), 'utf8')
     const supervisor = await readFile(resolve(root, 'src-tauri/src/sidecar/supervisor.rs'), 'utf8')
 
-    expect(upstream).toContain('detached: platform !== "win32"')
+    expect(subprocessChunks.some(chunk => chunk.includes('detached: platform !== "win32"'))).toBe(true)
+    expect(upstream).toContain('selectContainmentMode')
     expect(processTree).toContain('descendants_of(record.leader.pid')
     expect(processTree).toContain('pub fn terminate_registered')
     expect(supervisor).toContain('process_tree::terminate_registered(')
+  })
+
+  it('锁定 DeepSeek V4.1 Flash 默认模型目录与缓存友好系统提示词更新契约', async () => {
+    const deepseekAdapter = await readFile(resolve(
+      root,
+      'runtime/dsh/node_modules/@deepseek-ai/dsh-llm-deepseek/lib/index.js'
+    ), 'utf8')
+    const deepseekReadme = await readFile(resolve(
+      root,
+      'runtime/dsh/node_modules/@deepseek-ai/dsh-llm-deepseek/README.md'
+    ), 'utf8')
+
+    expect(deepseekAdapter).toContain('id: "deepseek-flash"')
+    expect(deepseekAdapter).toContain('name: "DeepSeek-V41-Flash"')
+    expect(deepseekAdapter).toContain('inputModalities: ["text", "image"]')
+    expect(deepseekAdapter).toContain('systemPromptUpdate: "in-history"')
+    expect(deepseekReadme).toContain('The default `deepseek-flash` entry declares this mode')
   })
 })

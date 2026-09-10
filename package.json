@@ -1,6 +1,6 @@
 {
   "name": "deepshell-agent",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "type": "module",
   "description": "A desktop agent powered by DeepSeek Harness.",
@@ -46,7 +46,7 @@
     "@tauri-apps/api": "2.11.1"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh": "0.1.2-rc.1",
+    "@deepseek-ai/dsh": "0.1.5-rc.1",
     "@tauri-apps/cli": "2.11.4",
     "@types/node": "26.4.1",
     "@wdio/cli": "9.31.5",

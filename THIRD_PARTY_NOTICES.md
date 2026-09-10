@@ -15,13 +15,13 @@ This project license does not change the licenses of bundled or linked third-par
 | Component | Locked version | Declared license | License source |
 |---|---:|---|---|
 | Node.js | 24.20.0 | Node.js license plus bundled third-party notices | downloaded during `pnpm runtime:prepare` |
-| DeepSeek Harness CLI (`@deepseek-ai/dsh`) | 0.1.2-rc.1 | MIT | installed from `runtime/manifest/dsh-install/package-lock.json` |
+| DeepSeek Harness CLI (`@deepseek-ai/dsh`) | 0.1.5-rc.1 | MIT | installed from `runtime/manifest/dsh-install/package-lock.json` |
 | React | 18.3.1 | MIT | installed as part of the locked DSH/runtime dependency set |
 | sharp/libvips Darwin arm64 runtime | 1.3.3 | LGPL-3.0-or-later | package metadata and bundled license files |
 
 The DSH production dependency tree is installed from `runtime/manifest/dsh-install/package-lock.json` with `npm ci`. The generated runtime, installed dependency tree, cache, staging manifests, and local evidence files are build artifacts and are not committed to the public source repository.
 
-A complete machine-readable package/version/license inventory should be regenerated for each distributable release package and shipped or published with that release artifact as appropriate. In `v0.1.1`, `pnpm licenses:collect` writes the current inventory to ignored release staging, `pnpm sbom:generate` derives a baseline SBOM from that inventory, and `pnpm security:audit` prepares a vulnerability-audit report for release review.
+A complete machine-readable package/version/license inventory should be regenerated for each distributable release package and shipped or published with that release artifact as appropriate. In `v0.1.2`, `pnpm licenses:collect` writes the current inventory to ignored release staging, `pnpm sbom:generate` derives a baseline SBOM from that inventory, and `pnpm security:audit` prepares a vulnerability-audit report for release review.
 
 LGPL-licensed runtime components such as libvips require special release handling: preserve the license text and notices, document whether the component was modified, and provide the source or source-location information required by the component license.
 

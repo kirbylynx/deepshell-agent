@@ -15,13 +15,13 @@ This project license does not change the licenses of bundled or linked third-par
 | Component | Locked version | Declared license | License source |
 |---|---:|---|---|
 | Node.js | 24.20.0 | Node.js license plus bundled third-party notices | downloaded during `pnpm runtime:prepare` |
-| DeepSeek Harness CLI (`@deepseek-ai/dsh`) | 0.1.2-rc.1 | MIT | installed from `runtime/manifest/dsh-install/package-lock.json` |
+| DeepSeek Harness CLI (`@deepseek-ai/dsh`) | 0.1.5-rc.1 | MIT | installed from `runtime/manifest/dsh-install/package-lock.json` |
 | React | 18.3.1 | MIT | installed as part of the locked DSH/runtime dependency set |
 | sharp/libvips Darwin arm64 runtime | 1.3.3 | LGPL-3.0-or-later | package metadata and the package's bundled license files |
 
 The DSH production dependency tree is installed from `runtime/manifest/dsh-install/package-lock.json` with `npm ci`. The generated runtime, installed dependency tree, cache, staging manifests and local evidence files are build artifacts and are not committed to the public source repository.
 
-每个可分发 release package 都应重新生成完整的机器可读 package/version/license inventory，并按需随 release artifact 一并提供或发布。`v0.1.1` 中，`pnpm licenses:collect` 会将当前 inventory 写入 ignored release staging，`pnpm sbom:generate` 会基于该 inventory 派生 SBOM 基线，`pnpm security:audit` 会生成用于 release review 的漏洞扫描报告。
+每个可分发 release package 都应重新生成完整的机器可读 package/version/license inventory，并按需随 release artifact 一并提供或发布。`v0.1.2` 中，`pnpm licenses:collect` 会将当前 inventory 写入 ignored release staging，`pnpm sbom:generate` 会基于该 inventory 派生 SBOM 基线，`pnpm security:audit` 会生成用于 release review 的漏洞扫描报告。
 
 LGPL-licensed runtime components such as libvips require special release handling: preserve the license text and notices, document whether the component was modified, and provide the source or source-location information required by the component license.
 

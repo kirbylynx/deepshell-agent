@@ -171,7 +171,7 @@ describe('v0.1.1 release hardening scripts', () => {
       await writeFile(inventory, JSON.stringify({
         application: { name: 'DeepShell Agent', version: '0.1.1-test' },
         bundledNode: { version: '24.20.0' },
-        bundledDshNpmPackages: [{ name: '@deepseek-ai/dsh', version: '0.1.2-rc.1', license: 'MIT', installed: true }],
+        bundledDshNpmPackages: [{ name: '@deepseek-ai/dsh', version: '0.1.5-rc.1', license: 'MIT', installed: true }],
         directBuildAndTestNpmPackages: [],
         rustRegistryPackages: []
       }))
