@@ -14,9 +14,13 @@ describe('DSH 上游边界', () => {
 
   it('显式拒绝新 WebView，并限制 Tauri Capability 为本地 Bootstrap', async () => {
     const source = await readFile(resolve(root, 'src-tauri/src/lib.rs'), 'utf8')
+    const webview = await readFile(resolve(root, 'src-tauri/src/webview.rs'), 'utf8')
     const capability = JSON.parse(await readFile(resolve(root, 'src-tauri/capabilities/main.json'), 'utf8'))
     expect(source).toContain('.on_new_window')
     expect(source).toContain('NewWindowResponse::Deny')
+    expect(webview).toContain('#[cfg(target_os = "macos")]')
+    expect(webview).toContain('#[cfg(target_os = "windows")]')
+    expect(webview).toContain('Command::new("cmd")')
     expect(capability.local).toBe(true)
     expect(capability.remote).toBeUndefined()
   })

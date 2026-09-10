@@ -83,6 +83,12 @@ impl AppPaths {
                 .join("deepshell-work/preset.yml")
                 .is_file()
             || !template_agent_presets
+                .join("deepshell-general/agent.cordis.yml")
+                .is_file()
+            || !template_agent_presets
+                .join("deepshell-general/preset.yml")
+                .is_file()
+            || !template_agent_presets
                 .join("deepshell/agent.cordis.yml")
                 .is_file()
             || !template_agent_presets
@@ -393,6 +399,7 @@ mod tests {
         .unwrap();
         fs::create_dir_all(template.join(".agent-presets/deepshell-coding")).unwrap();
         fs::create_dir_all(template.join(".agent-presets/deepshell-work")).unwrap();
+        fs::create_dir_all(template.join(".agent-presets/deepshell-general")).unwrap();
         fs::create_dir_all(template.join(".agent-presets/deepshell")).unwrap();
         fs::create_dir_all(runtime.join(runtime_node_path()).parent().unwrap()).unwrap();
         fs::create_dir_all(runtime.join("dsh/node_modules/@deepseek-ai/dsh/lib")).unwrap();
@@ -426,6 +433,16 @@ mod tests {
         .unwrap();
         fs::write(
             template.join(".agent-presets/deepshell-work/preset.yml"),
+            "preset-v1",
+        )
+        .unwrap();
+        fs::write(
+            template.join(".agent-presets/deepshell-general/agent.cordis.yml"),
+            "agent-v1",
+        )
+        .unwrap();
+        fs::write(
+            template.join(".agent-presets/deepshell-general/preset.yml"),
             "preset-v1",
         )
         .unwrap();

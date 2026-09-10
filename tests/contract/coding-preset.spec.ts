@@ -17,6 +17,7 @@ describe('DeepShell Agent Mode Preset 契约', () => {
       root,
       'runtime/profile-template/template-manifest.json'
     ), 'utf8'))
+    const pathsSource = await readFile(resolve(root, 'src-tauri/src/paths.rs'), 'utf8')
     const patch = await readFile(resolve(
       root,
       'dsh/bundles/deepshell-desktop/cordis.patch.yml'
@@ -41,6 +42,8 @@ describe('DeepShell Agent Mode Preset 契约', () => {
       'deepshell-work'
     ])
     expect(manifest.agentPresetSourceSha256).toBe(createHash('sha256').update(upstream).digest('hex'))
+    expect(pathsSource).toContain('deepshell-general/agent.cordis.yml')
+    expect(pathsSource).toContain('deepshell-general/preset.yml')
     expect(patch).toMatch(/id:\s*agent-presets[\s\S]*?default:\s*deepshell-coding/)
     expect(patch).not.toMatch(/id:\s*(tool-web|web-search-deepseek|web-fetch-http)[\s\S]*?disabled:\s*true/)
   })

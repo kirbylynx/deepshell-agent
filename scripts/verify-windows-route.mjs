@@ -77,6 +77,7 @@ const commands = [
   'pnpm profile:prepare',
   'pnpm profile:verify',
   'pnpm package:mvp',
+  'pnpm security:audit',
   'pnpm release:stage'
 ]
 const result = {

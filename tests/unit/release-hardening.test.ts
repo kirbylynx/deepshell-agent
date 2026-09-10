@@ -195,5 +195,7 @@ describe('v0.1.1 release hardening scripts', () => {
       expect(windows.validationPolicy).toContain('never count as Windows installer pass')
       expect(windows.checks.msvc.status).toBe('not-checked-current-platform')
     }
+    expect(windows.commands).toContain('pnpm security:audit')
+    expect(windows.commands.indexOf('pnpm security:audit')).toBeLessThan(windows.commands.indexOf('pnpm release:stage'))
   })
 })

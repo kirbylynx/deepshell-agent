@@ -83,6 +83,11 @@ pub fn open_external(url: &Url) -> Result<(), AppError> {
             "只允许把 HTTP(S) 外链交给系统浏览器",
         ));
     }
+    open_http_external(url)
+}
+
+#[cfg(target_os = "macos")]
+fn open_http_external(url: &Url) -> Result<(), AppError> {
     Command::new("/usr/bin/open")
         .arg(url.as_str())
         .spawn()
@@ -93,6 +98,28 @@ pub fn open_external(url: &Url) -> Result<(), AppError> {
                 format!("无法打开系统浏览器：{error}"),
             )
         })
+}
+
+#[cfg(target_os = "windows")]
+fn open_http_external(url: &Url) -> Result<(), AppError> {
+    Command::new("cmd")
+        .args(["/C", "start", "", url.as_str()])
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| {
+            AppError::new(
+                ErrorCode::NavigationBlocked,
+                format!("无法打开系统浏览器：{error}"),
+            )
+        })
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
+fn open_http_external(_url: &Url) -> Result<(), AppError> {
+    Err(AppError::new(
+        ErrorCode::NavigationBlocked,
+        "当前平台暂不支持打开系统浏览器",
+    ))
 }
 
 fn origin_of(url: &Url) -> Option<Origin> {
