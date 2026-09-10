@@ -1,5 +1,5 @@
 import { access, readFile } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { resolve, win32 as win32Path } from 'node:path'
 import { spawn } from 'node:child_process'
 import Ajv2020 from 'ajv/dist/2020.js'
 import {
@@ -25,6 +25,22 @@ function output(executable, args, options = {}) {
   })
 }
 
+function nodeVersionEnv() {
+  if (process.platform !== 'win32') return { PATH: '/usr/bin:/bin' }
+  const systemRoot = process.env.SystemRoot ?? process.env.WINDIR ?? 'C:\\Windows'
+  return {
+    SystemRoot: systemRoot,
+    WINDIR: process.env.WINDIR ?? systemRoot,
+    ComSpec: process.env.ComSpec ?? win32Path.join(systemRoot, 'System32', 'cmd.exe'),
+    PATHEXT: process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD',
+    PATH: [
+      win32Path.join(systemRoot, 'System32'),
+      systemRoot,
+      win32Path.join(systemRoot, 'System32', 'WindowsPowerShell', 'v1.0')
+    ].join(';')
+  }
+}
+
 const lock = await readLock()
 const requestedTarget = parseTargetArg()
 const targets = requestedTarget === 'all' ? supportedPlatforms : [requestedTarget]
@@ -47,7 +63,7 @@ const entry = resolve(root, 'runtime/dsh', lock.dsh.entry)
 for (const item of [entry, resolve(root, 'dsh/bundles/deepshell-desktop/lib/index.js'), resolve(root, 'dsh/bundles/deepshell-desktop/lib/client.js')]) await access(item)
 const hostTarget = parseTargetArg([])
 if (targets.includes(hostTarget)) {
-  const actualNode = await output(nodeExecutablePath(lock, hostTarget), ['--version'], { env: { PATH: '/usr/bin:/bin' } })
+  const actualNode = await output(nodeExecutablePath(lock, hostTarget), ['--version'], { env: nodeVersionEnv() })
   if (actualNode !== `v${lock.node.version}`) throw new Error(`Node 版本不一致: ${actualNode}`)
 }
 const packageJson = JSON.parse(await readFile(resolve(root, 'runtime/dsh/node_modules/@deepseek-ai/dsh/package.json'), 'utf8'))

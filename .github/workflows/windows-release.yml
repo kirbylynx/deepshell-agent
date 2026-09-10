@@ -59,6 +59,7 @@ jobs:
           pnpm licenses:collect
           pnpm sbom:generate
           pnpm package:report
+          pnpm security:audit
           pnpm release:stage
 
       - name: Upload Windows bundle artifacts

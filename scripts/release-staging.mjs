@@ -114,6 +114,13 @@ await copyJsonIfPresent(
   'package-report',
   version
 )
+await copyJsonIfPresent(
+  resolve(argValue('--security-audit', resolve(root, 'runtime/staging/security-audit.json'))),
+  resolve(outputDirectory, `deepshell-agent-v${version}-security-audit.json`),
+  assets,
+  'security-audit',
+  version
+)
 
 const presentAssets = assets.filter(asset => asset.status === 'present')
 const sums = presentAssets.map(asset => `${asset.sha256}  ${asset.asset}`).join('\n')

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { access, writeFile, mkdir, readFile } from 'node:fs/promises'
+import { access, writeFile, mkdir, readFile, readdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { root } from './lib/runtime.mjs'
 import { redactedJson } from './lib/redaction.mjs'
@@ -16,12 +16,34 @@ async function commandVersion(command, args = ['--version']) {
   }
 }
 
+async function registryValuePresent(key, valueName) {
+  try {
+    const { stdout, stderr } = await execFileAsync('reg.exe', ['query', key, '/v', valueName], { timeout: 15_000 })
+    return `${stdout}${stderr}`.includes('REG_')
+  } catch {
+    return false
+  }
+}
+
 async function webview2Runtime() {
   if (process.platform !== 'win32') return { status: 'not-checked-current-platform' }
-  const candidates = [
-    resolve(process.env['PROGRAMFILES(X86)'] ?? 'C:/Program Files (x86)', 'Microsoft/EdgeWebView/Application/msedgewebview2.exe'),
-    resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'Microsoft/EdgeWebView/Application/msedgewebview2.exe')
-  ]
+  const applicationDirectories = [
+    resolve(process.env['PROGRAMFILES(X86)'] ?? 'C:/Program Files (x86)', 'Microsoft/EdgeWebView/Application'),
+    resolve(process.env.ProgramFiles ?? 'C:/Program Files', 'Microsoft/EdgeWebView/Application'),
+    process.env.LOCALAPPDATA ? resolve(process.env.LOCALAPPDATA, 'Microsoft/EdgeWebView/Application') : null
+  ].filter(Boolean)
+  const candidates = []
+  for (const directory of applicationDirectories) {
+    candidates.push(resolve(directory, 'msedgewebview2.exe'))
+    try {
+      const children = await readdir(directory, { withFileTypes: true })
+      for (const child of children) {
+        if (child.isDirectory()) candidates.push(resolve(directory, child.name, 'msedgewebview2.exe'))
+      }
+    } catch {
+      // 没有该目录时继续检查其他标准安装位置。
+    }
+  }
   for (const candidate of candidates) {
     try {
       await access(candidate)
@@ -30,7 +52,9 @@ async function webview2Runtime() {
       // 继续检查下一个候选路径。
     }
   }
-  return { status: 'missing', message: 'Microsoft Edge WebView2 Runtime executable was not found in standard install paths' }
+  if (await registryValuePresent('HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv')) return { status: 'present' }
+  if (await registryValuePresent('HKCU\\SOFTWARE\\Microsoft\\EdgeUpdate\\Clients\\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}', 'pv')) return { status: 'present' }
+  return { status: 'missing', message: 'Microsoft Edge WebView2 Runtime was not found in standard install paths or registry locations' }
 }
 
 const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))

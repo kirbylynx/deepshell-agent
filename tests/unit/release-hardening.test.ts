@@ -21,9 +21,12 @@ describe('v0.1.1 release hardening scripts', () => {
     try {
       const log = resolve(temporary, 'app.jsonl')
       const output = resolve(temporary, 'out')
+      const windowsUserPath = 'C:\\Users\\Alice\\AppData\\Roaming\\DeepShell\\secrets.txt'
+      const windowsDocumentPath = 'C:\\Users\\Alice\\Documents\\private.md'
       await writeFile(log, [
         '{"level":"error","authorization":"Bearer sk-1234567890abcdefghijklmnop","prompt":"' + 'x'.repeat(120) + '"}',
-        '{"cookie":"session=secret-cookie","path":"' + process.env.HOME + '/Documents/private.md"}'
+        '{"cookie":"session=secret-cookie","path":"' + process.env.HOME + '/Documents/private.md"}',
+        '{"path":"' + windowsUserPath.replace(/\\/g, '\\\\') + '","message":"' + windowsDocumentPath.replace(/\\/g, '\\\\') + '"}'
       ].join('\n'))
       await runNode(['scripts/collect-diagnostics.mjs', '--log-file', log, '--output', output])
 
@@ -35,6 +38,8 @@ describe('v0.1.1 release hardening scripts', () => {
       expect(combined).not.toContain('secret-cookie')
       expect(combined).not.toContain('1234567890abcdefghijklmnop')
       if (process.env.HOME) expect(combined).not.toContain(process.env.HOME)
+      expect(combined).not.toContain('C:\\\\Users\\\\Alice')
+      expect(combined).not.toContain('AppData\\\\Roaming')
     } finally {
       await rm(temporary, { recursive: true, force: true })
     }
@@ -95,6 +100,7 @@ describe('v0.1.1 release hardening scripts', () => {
       const license = resolve(temporary, 'license.json')
       const sbom = resolve(temporary, 'sbom.json')
       const report = resolve(temporary, 'package-report.json')
+      const security = resolve(temporary, 'security-audit.json')
       const windowsInstaller = resolve(temporary, 'source.exe')
       const output = resolve(temporary, 'release')
       await writeFile(dmg, 'dmg')
@@ -102,6 +108,7 @@ describe('v0.1.1 release hardening scripts', () => {
       await writeFile(license, '{"application":{"version":"0.1.1-test"}}\n')
       await writeFile(sbom, '{"application":{"version":"0.1.1-test"}}\n')
       await writeFile(report, '{"application":{"version":"0.1.1-test"}}\n')
+      await writeFile(security, '{"application":{"version":"0.1.1-test"}}\n')
 
       await runNode([
         'scripts/release-staging.mjs',
@@ -111,7 +118,8 @@ describe('v0.1.1 release hardening scripts', () => {
         '--windows-installer', windowsInstaller,
         '--license-inventory', license,
         '--sbom', sbom,
-        '--package-report', report
+        '--package-report', report,
+        '--security-audit', security
       ])
 
       const sums = await readFile(resolve(output, 'SHA256SUMS.txt'), 'utf8')
@@ -119,6 +127,7 @@ describe('v0.1.1 release hardening scripts', () => {
       const notes = await readFile(resolve(output, 'RELEASE_NOTES.md'), 'utf8')
       expect(sums).toContain('DeepShell.Agent_0.1.1-test_aarch64.dmg')
       expect(sums).toContain('DeepShell.Agent_0.1.1-test_x64-setup.exe')
+      expect(sums).toContain('deepshell-agent-v0.1.1-test-security-audit.json')
       expect(sums).not.toContain(temporary)
       expect(manifest.publishPolicy).toContain('explicit user authorization')
       expect(notes).toContain('Windows x64: route/checklist prepared')
