@@ -20,6 +20,11 @@ const agentPresets = [
     description: '基于官方 standard Preset 的 Work Mode；MVP 聚焦 Web research 与本地文本/Markdown 文件任务。'
   },
   {
+    id: 'deepshell-general',
+    name: 'DeepShell General',
+    description: '基于官方 standard Preset 的 General Mode；用于通用问答、本地任务和轻量研究入口。'
+  },
+  {
     id: 'deepshell',
     name: 'DeepShell Coding (Legacy)',
     description: '兼容 v0.0.1 POC 旧会话的 Preset ID；配置与 DeepShell Coding 同源，默认新会话不再使用。',

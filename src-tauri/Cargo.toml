@@ -1,6 +1,6 @@
 [package]
 name = "deepshell-agent"
-version = "0.1.0"
+version = "0.1.1"
 description = "A desktop agent powered by DeepSeek Harness."
 license = "MIT"
 edition = "2021"

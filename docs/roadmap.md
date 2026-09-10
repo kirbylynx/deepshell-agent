@@ -56,6 +56,7 @@ Priority expresses relative importance only. It is not version ownership. Featur
 The Status column records current implementation facts and confirmed active-version planning facts:
 
 - `Implemented (v0.1.0)` means the feature has landed in the `v0.1.0` MVP and is part of the current validation baseline.
+- `Implemented (v0.1.1)` means the feature has landed in the `v0.1.1` release-hardening baseline and is covered by the current validation scope.
 - `Planned (v0.1.1)` means the feature is selected for the active `v0.1.1` planning/development branch, but has not yet landed as an implemented feature.
 - `Not started` means the Roadmap item has not landed as a complete feature. If a composite item is only partially complete, it is still treated as not fully implemented.
 - A planned status is not an implementation claim and does not replace Release Requirements, Design, Implementation Plan, or release closeout documents.
@@ -96,7 +97,7 @@ The Status column records current implementation facts and confirmed active-vers
 | UI-001 | Official DSH Web UI | Reuse the official React Web Client directly | P0 | Implemented (v0.1.0) |
 | UI-002 | DeepShell Branding Plugin | Product name, tagline, logo, and basic brand entry | P0 | Implemented (v0.1.0) |
 | UI-003 | Formal visual brand | Final logo, icon, color, theme, and app assets | P1 | Implemented (v0.1.0) |
-| UI-004 | Agent Mode entry | Show and switch General, Coding, and Work | P1 | Planned (v0.1.1) |
+| UI-004 | Agent Mode entry | Show and switch General, Coding, and Work through the official Agent Preset UI and a DeepShell Mode header indicator | P1 | Implemented (v0.1.1) |
 | UI-005 | Coding Repository view | Show repository, branch, status, and related actions | P1 | Not started |
 | UI-006 | Git view | Show diff, changes, commits, and worktree state | P1 | Not started |
 | UI-007 | Tests view | Show test execution, progress, and failure details | P1 | Not started |
@@ -162,7 +163,7 @@ The Status column records current implementation facts and confirmed active-vers
 | MODE-009 | Context Strategy | Select context strategies for different Modes | P2 | Not started |
 | MODE-010 | Mode-switch snapshot | New Runs use new settings; running Runs keep their startup snapshot | P1 | Implemented (v0.1.0) |
 | MODE-011 | Research/Data/Recruiting/Engineering Mode | Extend work modes based on real demand | P2 | Not started |
-| MODE-012 | General Preset mapping | Map General Mode to a Session-level official Preset | P1 | Planned (v0.1.1) |
+| MODE-012 | General Preset mapping | Map General Mode to a Session-level official Preset | P1 | Implemented (v0.1.1) |
 
 ### 4.6 Session, Conversation, and runtime state
 
@@ -227,8 +228,8 @@ The Status column records current implementation facts and confirmed active-vers
 | SAFE-012 | Platform Sandbox capability matrix | Show actual macOS/Windows/Linux protection and degradation | P1 | Not started |
 | SAFE-013 | MCP permission and source display | Show commands, URLs, tools, credentials, and risks | P1 | Not started |
 | SAFE-014 | Plugin security policy | Restrict sources and loading for high-privilege extensions | P1 | Not started |
-| SAFE-015 | SBOM | Generate a software bill of materials | P1 | Planned (v0.1.1) |
-| SAFE-016 | Vulnerability scanning | Scan Rust, Node, and packaged dependencies | P1 | Planned (v0.1.1) |
+| SAFE-015 | SBOM | Generate a software bill of materials | P1 | Implemented (v0.1.1) |
+| SAFE-016 | Vulnerability scanning | Scan Rust, Node, and packaged dependencies | P1 | Implemented (v0.1.1) |
 | SAFE-017 | Audit trail | Link Runs, Tool Calls, Approvals, and configuration changes | P1 | Not started |
 | SAFE-018 | Prompt Injection protection | Mark untrusted sources and control tool/exfiltration boundaries | P1 | Not started |
 
@@ -309,8 +310,8 @@ The Status column records current implementation facts and confirmed active-vers
 | OPS-004 | Structured logging | Link app, DSH, Session, Run, and Tool Call | P0 | Implemented (v0.1.0) |
 | OPS-005 | Log redaction and rotation | Control secrets, content, and disk growth | P0 | Implemented (v0.1.0) |
 | OPS-006 | Runtime state | Distinguish Desktop, Sidecar, Client, Provider, and MCP states | P0 | Implemented (v0.1.0) |
-| OPS-007 | Diagnostic bundle | User-previewable, redacted diagnostic export | P1 | Planned (v0.1.1) |
-| OPS-008 | Performance observability | Startup, memory, package size, and runtime duration | P1 | Planned (v0.1.1) |
+| OPS-007 | Diagnostic bundle | User-previewable, redacted diagnostic export | P1 | Implemented (v0.1.1) |
+| OPS-008 | Performance observability | Startup, memory, package size, and runtime duration | P1 | Implemented (v0.1.1) |
 | OPS-009 | Configuration and data migration | Idempotent upgrades with readability verification | P1 | Implemented (v0.1.0) |
 | OPS-010 | Pre-upgrade backup and recovery | Limited backups, fail-stop, and recovery instructions | P1 | Not started |
 | OPS-011 | Data cleanup | Explicitly clear Sessions, cache, or all app data | P2 | Not started |
@@ -328,16 +329,18 @@ The Status column records current implementation facts and confirmed active-vers
 | REL-004 | macOS `.dmg` | Generate a macOS disk image; formal distribution still depends on signing and notarization | P1 | Implemented (v0.1.0) |
 | REL-005 | macOS Developer ID signing | Sign the app, Node, and Sidecar | P1 | Not started |
 | REL-006 | Apple Notarization | Complete notarization and Gatekeeper verification | P1 | Not started |
-| REL-007 | Windows x64 | Support WebView2, PowerShell Sandbox, and installer | P1 | Planned (v0.1.1) |
+| REL-007 | Windows x64 packaging route | Prepare WebView2/MSVC/runtime/profile checks, NSIS packaging workflow, and local route diagnostics | P1 | Implemented (v0.1.1) |
 | REL-008 | Windows Code Signing | Sign the app and Sidecar | P1 | Not started |
 | REL-009 | Linux Desktop | Support WebKitGTK and platform Sandbox | P3 | Not started |
 | REL-010 | Auto Update | Check, download, and install signed updates | P1 | Not started |
 | REL-011 | Atomic Compatibility Set | Upgrade App, Node, DSH, and first-party Plugins together | P1 | Implemented (v0.1.0) |
 | REL-012 | Data migration compatibility | Sessions, Settings, and Credentials remain readable after updates | P1 | Implemented (v0.1.0) |
-| REL-013 | Install/upgrade/uninstall tests | Validate real install artifacts and data retention | P1 | Planned (v0.1.1) |
+| REL-013 | Install/upgrade/uninstall acceptance checklist | Define repeatable real-artifact acceptance status and data-retention checks | P1 | Implemented (v0.1.1) |
 | REL-014 | Cross-WebView acceptance | WKWebView, WebView2, and WebKitGTK difference testing | P1 | Not started |
 | REL-015 | Mobile | iOS/Android client or companion app | P3 | Not started |
-| REL-016 | Release staging automation | Prepare public release assets, checksums, license inventory, SBOM/report references, and release notes drafts without publishing | P1 | Planned (v0.1.1) |
+| REL-016 | Release staging automation | Prepare public release assets, checksums, license inventory, SBOM/report references, and release notes drafts without publishing | P1 | Implemented (v0.1.1) |
+| REL-017 | Windows x64 installer validation | Validate the actual NSIS installer, WebView2 first run, Session creation, shutdown cleanup, and uninstall behavior on real Windows or CI | P1 | Not started |
+| REL-018 | Signed binary distribution | Publish signed/notarized platform installers for general users | P1 | Not started |
 
 ### 4.15 Testing and quality assurance
 
@@ -382,4 +385,4 @@ Before assigning a feature to a version, complete:
 6. Define verifiable completion criteria.
 7. Assign the feature to a concrete version only after the above is done.
 
-The Status column in this Roadmap records implemented facts and confirmed active-version planning facts. A planned item is not an implementation claim. Later version planning should happen in separate Release Requirements or Milestone documents, not by changing the meaning of priorities in this feature pool.
+The Status column in this Roadmap records implemented facts and confirmed active-version planning facts. A planned item is not an implementation claim, and route/checklist items must not be read as real platform installer acceptance. Later version planning should happen in separate Release Requirements or Milestone documents, not by changing the meaning of priorities in this feature pool.

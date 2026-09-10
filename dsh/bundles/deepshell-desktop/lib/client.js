@@ -59,6 +59,37 @@ window.__ModuleLoader__.load({
       }, 'DeepShell Agent')
     }
 
+    function modeFromPreset(preset) {
+      if (preset === 'deepshell-coding' || preset === 'deepshell') return 'Coding'
+      if (preset === 'deepshell-work') return 'Work'
+      if (preset === 'deepshell-general') return 'General'
+      return undefined
+    }
+
+    function ModeStatus({ sessionId, useSessions }) {
+      const preset = useSessions((state) => {
+        const value = state.byId[sessionId]?.projectionValues?.agentPreset
+        return typeof value === 'string' ? value : undefined
+      })
+      const mode = modeFromPreset(preset)
+      if (mode === undefined) return null
+      return createElement('span', {
+        title: `DeepShell Mode: ${mode} (${preset})`,
+        'aria-label': `DeepShell Mode: ${mode}`,
+        style: {
+          display: 'inline-flex',
+          alignItems: 'center',
+          borderRadius: 999,
+          border: '1px solid color-mix(in srgb, currentColor 18%, transparent)',
+          padding: '2px 8px',
+          fontSize: 12,
+          lineHeight: 1.4,
+          opacity: .82,
+          whiteSpace: 'nowrap'
+        }
+      }, `Mode: ${mode}`)
+    }
+
     function waitForBaseline(ctx, settings) {
       const sources = [ctx.connection.state, ctx.sessions.list, ctx.workspaces.list, settings]
       const isReady = () => {
@@ -99,17 +130,28 @@ window.__ModuleLoader__.load({
     }
 
     function apply(ctx) {
-      const dispose = ctx.slots.inject('sidebar.brand.mark', () =>
+      const brandDispose = ctx.slots.inject('sidebar.brand.mark', () =>
         ctx.slots.inject('sidebar.brand.name', () =>
           ctx.slots.inject('conversation.hero.brand.mark', function* () {
             yield ctx.slots.register({ name: 'sidebar.brand.mark', priority: -100 }, BrandMark)
             yield ctx.slots.register({ name: 'sidebar.brand.name', priority: -100 }, BrandName)
             yield ctx.slots.register({ name: 'conversation.hero.brand.mark', priority: -100 }, BrandMark)
           })))
+      const modeDispose = ctx.slots.inject('conversation.session.header.utilities', function* () {
+        yield ctx.slots.register({
+          name: 'conversation.session.header.utilities',
+          id: 'deepshell-mode',
+          order: -20,
+          label: 'DeepShell Mode'
+        }, ModeStatus)
+      })
       queueMicrotask(() => void announceReady(ctx).catch(() => {
         console.error('DeepShell Agent baseline readiness failed')
       }))
-      return dispose
+      return () => {
+        modeDispose()
+        brandDispose()
+      }
     }
 
     exports.apply = apply

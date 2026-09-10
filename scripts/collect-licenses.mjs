@@ -84,7 +84,10 @@ const output = {
   ]
 }
 
-const targetDirectory = resolve(root, 'docs/plans/v0.1.0-mvp/evidence')
-await mkdir(targetDirectory, { recursive: true })
-await writeFile(resolve(targetDirectory, 'licenses.json'), JSON.stringify(output, null, 2) + '\n')
+const stagingDirectory = resolve(root, 'runtime/staging')
+await mkdir(stagingDirectory, { recursive: true })
+await writeFile(resolve(stagingDirectory, 'license-inventory.json'), JSON.stringify(output, null, 2) + '\n')
+const legacyEvidenceDirectory = resolve(root, 'docs/plans/v0.1.0-mvp/evidence')
+await mkdir(legacyEvidenceDirectory, { recursive: true })
+await writeFile(resolve(legacyEvidenceDirectory, 'licenses.json'), JSON.stringify(output, null, 2) + '\n')
 console.log(`license inventory written: ${runtimePackages.length} npm runtime packages, ${rustPackages.length} Rust packages`)

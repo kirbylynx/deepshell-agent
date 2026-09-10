@@ -21,13 +21,15 @@ This project license does not change the licenses of bundled or linked third-par
 
 The DSH production dependency tree is installed from `runtime/manifest/dsh-install/package-lock.json` with `npm ci`. The generated runtime, installed dependency tree, cache, staging manifests, and local evidence files are build artifacts and are not committed to the public source repository.
 
-A complete machine-readable package/version/license inventory should be regenerated for each distributable release package and shipped or published with that release artifact as appropriate.
+A complete machine-readable package/version/license inventory should be regenerated for each distributable release package and shipped or published with that release artifact as appropriate. In `v0.1.1`, `pnpm licenses:collect` writes the current inventory to ignored release staging, and `pnpm sbom:generate` derives a baseline SBOM from that inventory.
 
 LGPL-licensed runtime components such as libvips require special release handling: preserve the license text and notices, document whether the component was modified, and provide the source or source-location information required by the component license.
 
 ## Build-time and application-framework components
 
 The application uses Tauri 2 and Rust crates. Its build/test toolchain uses pnpm, Vite, TypeScript, Vitest, and WebdriverIO. Exact versions come from `src-tauri/Cargo.lock`, `pnpm-lock.yaml`, and `runtime/manifest/runtime-lock.json`. The generated inventory lists all Cargo registry packages and direct npm build/test dependencies.
+
+`pnpm package:report` and `pnpm release:stage` prepare aggregate package metrics, checksums, SBOM references, and release-note drafts locally. These commands do not publish releases or upload assets.
 
 `tauri-plugin-wdio-webdriver` and WebdriverIO tooling are test-only. Package comparison must prove that the WebDriver Rust plugin and the `poc-e2e` capability are absent from the Release `.app`.
 

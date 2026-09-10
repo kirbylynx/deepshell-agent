@@ -21,13 +21,15 @@ This project license does not change the licenses of bundled or linked third-par
 
 The DSH production dependency tree is installed from `runtime/manifest/dsh-install/package-lock.json` with `npm ci`. The generated runtime, installed dependency tree, cache, staging manifests and local evidence files are build artifacts and are not committed to the public source repository.
 
-A complete machine-readable package/version/license inventory should be regenerated for each distributable release package and shipped or published with that release artifact as appropriate.
+每个可分发 release package 都应重新生成完整的机器可读 package/version/license inventory，并按需随 release artifact 一并提供或发布。`v0.1.1` 中，`pnpm licenses:collect` 会将当前 inventory 写入 ignored release staging，`pnpm sbom:generate` 会基于该 inventory 派生 SBOM 基线。
 
 LGPL-licensed runtime components such as libvips require special release handling: preserve the license text and notices, document whether the component was modified, and provide the source or source-location information required by the component license.
 
 ## Build-time and application-framework components
 
-The application uses Tauri 2 and Rust crates, and its build/test toolchain uses pnpm, Vite, TypeScript, Vitest and WebdriverIO. Exact versions come from `src-tauri/Cargo.lock`, `pnpm-lock.yaml` and `runtime/manifest/runtime-lock.json`. The generated inventory lists all Cargo registry packages and direct npm build/test dependencies.
+本应用使用 Tauri 2 和 Rust crates；构建/测试工具链使用 pnpm、Vite、TypeScript、Vitest 和 WebdriverIO。精确版本来自 `src-tauri/Cargo.lock`、`pnpm-lock.yaml` 和 `runtime/manifest/runtime-lock.json`。生成的 inventory 会列出 Cargo registry packages 和直接 npm build/test dependencies。
+
+`pnpm package:report` 和 `pnpm release:stage` 会在本地准备聚合包体积指标、校验和、SBOM 引用和 release notes 草稿。这些命令不会发布 release，也不会上传资产。
 
 `tauri-plugin-wdio-webdriver` and the WebdriverIO tooling are test-only. Package comparison must prove that the WebDriver Rust plugin and `poc-e2e` capability are absent from the Release `.app`.
 

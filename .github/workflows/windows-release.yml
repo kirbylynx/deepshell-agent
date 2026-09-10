@@ -1,0 +1,71 @@
+name: Windows release route
+
+on:
+  workflow_dispatch:
+
+jobs:
+  package-windows-x64:
+    name: Package Windows x64
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.30.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve package version
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          "DEEPSHELL_VERSION=$version" >> $env:GITHUB_ENV
+
+      - name: Prepare runtime
+        run: pnpm runtime:prepare --target all
+
+      - name: Verify runtime and profile
+        run: |
+          pnpm runtime:verify --target all
+          pnpm profile:prepare
+          pnpm profile:verify
+
+      - name: Check Windows route
+        run: pnpm release:windows:check
+
+      - name: Package NSIS installer
+        run: pnpm package:mvp
+
+      - name: Collect release support artifacts
+        run: |
+          pnpm licenses:collect
+          pnpm sbom:generate
+          pnpm package:report
+          pnpm release:stage
+
+      - name: Upload Windows bundle artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: deepshell-agent-windows-x64-v${{ env.DEEPSHELL_VERSION }}
+          path: |
+            src-tauri/target/release/bundle/nsis/*
+            runtime/staging/release-v${{ env.DEEPSHELL_VERSION }}/*
+          if-no-files-found: error

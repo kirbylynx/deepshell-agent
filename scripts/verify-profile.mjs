@@ -19,7 +19,7 @@ const template = resolve(root, 'runtime/profile-template')
 const profile = resolve(template, 'profiles/web')
 const bundledPlugin = resolve(profile, 'node_modules/@deepshell-agent/dsh-desktop')
 const lock = await readLock()
-const presetIds = ['deepshell-coding', 'deepshell-work', 'deepshell']
+const presetIds = ['deepshell-coding', 'deepshell-work', 'deepshell-general', 'deepshell']
 
 const manifest = JSON.parse(await readFile(resolve(template, 'template-manifest.json'), 'utf8'))
 if (

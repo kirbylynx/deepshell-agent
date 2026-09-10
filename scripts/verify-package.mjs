@@ -8,6 +8,7 @@ const mode = process.argv[2] ?? 'release'
 if (!['e2e', 'release'].includes(mode)) throw new Error('用法：verify-package.mjs <e2e|release>')
 
 const lock = await readLock()
+const rootPackage = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
 const execFileAsync = promisify(execFile)
 const app = resolve(root, 'src-tauri/target/release/bundle/macos/DeepShell Agent.app')
 const required = [
@@ -20,7 +21,7 @@ const required = [
 ]
 for (const relative of required) await access(resolve(app, relative))
 const plist = await readFile(resolve(app, 'Contents/Info.plist'), 'utf8')
-if (!plist.includes('0.1.0')) throw new Error('Info.plist 版本不一致')
+if (!plist.includes(rootPackage.version)) throw new Error('Info.plist 版本不一致')
 if (/isInspectable|poc-e2e|wdio/i.test(plist)) throw new Error('Release Info.plist 含测试配置')
 await execFileAsync('/usr/bin/codesign', ['--verify', '--deep', '--strict', app])
 const binary = resolve(app, 'Contents/MacOS/deepshell-agent')

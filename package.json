@@ -1,6 +1,6 @@
 {
   "name": "deepshell-agent",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "description": "A desktop agent powered by DeepSeek Harness.",
@@ -32,8 +32,14 @@
     "package:sign": "node scripts/sign-package.mjs",
     "package:verify": "node scripts/verify-package.mjs release",
     "package:compare": "node scripts/compare-e2e-release.mjs",
+    "package:report": "node scripts/collect-package-report.mjs",
     "evidence:collect": "node scripts/collect-evidence.mjs",
     "licenses:collect": "node scripts/collect-licenses.mjs",
+    "diagnostics:collect": "node scripts/collect-diagnostics.mjs",
+    "release:stage": "node scripts/release-staging.mjs",
+    "release:windows:check": "node scripts/verify-windows-route.mjs",
+    "sbom:generate": "node scripts/generate-sbom.mjs",
+    "security:audit": "node scripts/security-audit.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

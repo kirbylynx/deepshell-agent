@@ -12,7 +12,7 @@ DeepShell Agent does not reimplement the Agent Runtime and does not fork the off
 
 ## Current status
 
-The current source baseline is `v0.1.0` MVP (Minimum Viable Product).
+The current source baseline is `v0.1.1` release-hardening baseline on top of the `v0.1.0` MVP (Minimum Viable Product).
 
 Capabilities already included in the source baseline:
 
@@ -22,12 +22,13 @@ Capabilities already included in the source baseline:
 - pinned official DSH runtime;
 - official DSH React Web UI;
 - DeepShell first-party `deepshell-desktop` DSH Bundle;
-- `deepshell-coding`, `deepshell-work`, and legacy `deepshell` Agent Presets;
+- `deepshell-coding`, `deepshell-work`, `deepshell-general`, and legacy `deepshell` Agent Presets;
 - DeepSeek official API, OpenAI-compatible API, and Responses API routing;
 - official `workspace-write` Permission Preset;
 - official `credentials-local` credential scheme;
 - DeepSeek Web Search and public HTTP(S) Web Fetch;
 - Sidecar dynamic port, token cleanup, Ready Gate, process cleanup, and basic recovery;
+- redacted local diagnostics, package-size reporting, SBOM baseline, vulnerability-audit entrypoint, and release staging automation;
 - E2E/Release artifact security-boundary comparison.
 
 Still required before formal public binary distribution:
@@ -44,6 +45,10 @@ Still required before formal public binary distribution:
 
 Coding Mode targets code workspaces. It reuses DSH file, search, Shell, test, Git, Session, and Approval capabilities for code understanding, modification, verification, and change explanation.
 
+### General Mode
+
+General Mode provides a general-purpose Agent entry for Q&A, local tasks, and lightweight research. In `v0.1.1`, it is implemented as the `deepshell-general` Agent Preset and uses the official DSH Agent Preset UI.
+
 ### Work Mode
 
 Work Mode targets general research and text output. The MVP focuses on:
@@ -54,7 +59,7 @@ Work Mode targets general research and text output. The MVP focuses on:
 - structured result capture;
 - session-history recovery.
 
-Native Office/PDF/PPTX/XLSX parsing, complex knowledge bases, enterprise connectors, and dedicated document UI are not part of the `v0.1.0` scope.
+Native Office/PDF/PPTX/XLSX parsing, complex knowledge bases, enterprise connectors, and dedicated document UI are not part of the current baseline.
 
 ### Model Providers
 
@@ -101,7 +106,7 @@ A typical first-run flow is:
 1. Open DeepShell Agent.
 2. Configure the DeepSeek official API, or add an OpenAI-compatible / Responses API Provider in Models Settings.
 3. Select or create a Workspace.
-4. Create a Coding Mode or Work Mode Session.
+4. Create a General, Coding, or Work Mode Session.
 5. Ask the Agent to read, search, or modify Workspace files, run necessary commands, or use Web Search / Web Fetch for research and text output.
 
 ## Permissions and credentials
@@ -125,7 +130,7 @@ It does not commit:
 - installed dependency trees;
 - build cache;
 - local `.app`, `.dmg`, or installer artifacts;
-- E2E staging manifests;
+- E2E and release staging manifests;
 - local acceptance evidence;
 - logs, screenshots, diagnostic bundles, or real secrets.
 
@@ -135,7 +140,7 @@ Binary packages should be distributed through GitHub Releases or another release
 
 DeepShell Agent source code is released under the MIT License. See [LICENSE](LICENSE).
 
-Third-party dependencies, bundled runtime components, and binary-release components remain under their own licenses. Before distributing binary packages, regenerate the platform-specific license/NOTICE inventory and ship or publish it with the release artifact. The current baseline is documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Third-party dependencies, bundled runtime components, and binary-release components remain under their own licenses. Before distributing binary packages, regenerate the platform-specific license/NOTICE inventory, SBOM, and release staging assets, then ship or publish the required notices with the release artifact. The current baseline is documented in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Documentation
 
@@ -143,6 +148,7 @@ Third-party dependencies, bundled runtime components, and binary-release compone
 - [Roadmap](docs/roadmap.md) ([中文](docs/roadmap.zh.md))
 - [v0.0.1 POC Closeout](docs/releases/v0.0.1.md) ([中文](docs/releases/v0.0.1.zh.md))
 - [v0.1.0 MVP Closeout](docs/releases/v0.1.0.md) ([中文](docs/releases/v0.1.0.zh.md))
+- [v0.1.1 Release-Hardening Closeout](docs/releases/v0.1.1.md) ([中文](docs/releases/v0.1.1.zh.md))
 
 `docs/plans/` is a local process-document directory for requirement exploration, design drafts, implementation plans, and acceptance evidence. It is not published with the public source repository by default.
 
@@ -313,6 +319,13 @@ pnpm package:e2e
 pnpm package:mvp
 pnpm package:verified
 pnpm package:compare
+pnpm licenses:collect
+pnpm sbom:generate
+pnpm package:report
+pnpm release:stage
+pnpm diagnostics:collect
+pnpm release:windows:check
+pnpm security:audit
 ```
 
 Notes:
@@ -326,3 +339,7 @@ Notes:
   - macOS: builds `.app`, signs, verifies, and generates `.dmg`;
   - Windows: builds an NSIS installer in a Windows build environment.
 - `pnpm package:verified` rebuilds E2E and Release artifacts and compares their security boundaries.
+- `pnpm licenses:collect`, `pnpm sbom:generate`, `pnpm package:report`, and `pnpm release:stage` prepare local release-support assets without publishing anything.
+- `pnpm diagnostics:collect` exports a local redacted diagnostics bundle under ignored staging.
+- `pnpm release:windows:check` reports the Windows x64 packaging route and must not be treated as Windows installer acceptance when run on macOS.
+- `pnpm security:audit` creates a vulnerability-audit summary; use `pnpm security:audit -- --dry-run` for deterministic pipeline checks.

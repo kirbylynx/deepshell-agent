@@ -12,7 +12,7 @@ DeepShell Agent 不重新实现 Agent Runtime，也不 fork 官方 DSH Web UI。
 
 ## 当前状态
 
-当前源码基线版本为 `v0.1.0` MVP（Minimum Viable Product，最小可用版本）。
+当前源码基线版本为基于 `v0.1.0` MVP（Minimum Viable Product，最小可用版本）的 `v0.1.1` 发布硬化基线。
 
 已经纳入源码基线的能力：
 
@@ -22,12 +22,13 @@ DeepShell Agent 不重新实现 Agent Runtime，也不 fork 官方 DSH Web UI。
 - pinned official DSH runtime；
 - 官方 DSH React Web UI；
 - DeepShell 自有 `deepshell-desktop` DSH Bundle；
-- `deepshell-coding`、`deepshell-work` 与 legacy `deepshell` Agent Preset；
+- `deepshell-coding`、`deepshell-work`、`deepshell-general` 与 legacy `deepshell` Agent Preset；
 - DeepSeek 官方 API、OpenAI-compatible API、Responses API 路由能力；
 - 官方 `workspace-write` Permission Preset；
 - 官方 `credentials-local` 凭据方案；
 - DeepSeek Web Search 与公共 HTTP(S) Web Fetch；
 - Sidecar 动态端口、token 清理、Ready Gate、进程清理和基础恢复；
+- 本地脱敏诊断包、包体积报告、SBOM 基线、漏洞扫描入口和 release staging 自动化；
 - E2E/Release 产物安全边界比较。
 
 仍需在正式二进制公开分发前完成：
@@ -44,6 +45,10 @@ DeepShell Agent 不重新实现 Agent Runtime，也不 fork 官方 DSH Web UI。
 
 Coding Mode 面向代码 Workspace，复用 DSH 的文件、搜索、Shell、测试、Git、Session 和 Approval 能力，用于代码理解、修改、验证和变更解释。
 
+### General Mode
+
+General Mode 提供通用问答、本地任务和轻量研究入口。`v0.1.1` 中它以 `deepshell-general` Agent Preset 形式落地，并复用官方 DSH Agent Preset UI。
+
 ### Work Mode
 
 Work Mode 面向通用研究和文本产出，当前 MVP 聚焦：
@@ -54,7 +59,7 @@ Work Mode 面向通用研究和文本产出，当前 MVP 聚焦：
 - 结构化结果沉淀；
 - 会话历史恢复。
 
-Office/PDF/PPTX/XLSX 原生解析、复杂知识库、企业 Connector 和专属文档 UI 暂不属于 `v0.1.0` 范围。
+Office/PDF/PPTX/XLSX 原生解析、复杂知识库、企业 Connector 和专属文档 UI 暂不属于当前基线范围。
 
 ### Model Providers
 
@@ -101,7 +106,7 @@ Office/PDF/PPTX/XLSX 原生解析、复杂知识库、企业 Connector 和专属
 1. 打开 DeepShell Agent。
 2. 在 Models Settings 中配置 DeepSeek 官方 API，或添加 OpenAI-compatible / Responses API Provider。
 3. 选择或创建 Workspace。
-4. 创建 Coding Mode 或 Work Mode Session。
+4. 创建 General、Coding 或 Work Mode Session。
 5. 在会话中让 Agent 读取、搜索、修改 Workspace 文件，运行必要命令，或使用 Web Search / Web Fetch 完成研究和文本产出。
 
 ## 权限与凭据
@@ -125,7 +130,7 @@ DeepShell Agent 默认沿用 DSH 官方 `workspace-write` Permission Preset：
 - 安装后的依赖树；
 - 构建缓存；
 - 本地 `.app`、`.dmg`、installer；
-- E2E staging manifest；
+- E2E 和 release staging manifest；
 - 本地验收证据；
 - 日志、截图、诊断包或任何真实 Secret。
 
@@ -135,7 +140,7 @@ DeepShell Agent 默认沿用 DSH 官方 `workspace-write` Permission Preset：
 
 DeepShell Agent 源码以 MIT License 发布，详见 [LICENSE](LICENSE)。
 
-第三方依赖、bundled runtime 和二进制发布包中的组件仍遵循各自的 license。发布二进制包前，应重新生成对应平台的许可证/NOTICE 清单，并随 release artifact 一并提供；当前基线见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+第三方依赖、bundled runtime 和二进制发布包中的组件仍遵循各自的 license。发布二进制包前，应重新生成对应平台的许可证/NOTICE 清单、SBOM 和 release staging assets，并随 release artifact 一并提供必要 notices；当前基线见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
 
 ## 文档
 
@@ -143,6 +148,7 @@ DeepShell Agent 源码以 MIT License 发布，详见 [LICENSE](LICENSE)。
 - [Roadmap](docs/roadmap.zh.md)
 - [v0.0.1 POC 收口](docs/releases/v0.0.1.zh.md)
 - [v0.1.0 MVP 收口](docs/releases/v0.1.0.zh.md)
+- [v0.1.1 发布硬化收口](docs/releases/v0.1.1.zh.md)
 
 `docs/plans/` 是本地过程文档目录，用于需求推演、设计草案、实施计划和验收证据整理，默认不随公开源码仓库发布。
 
@@ -313,6 +319,13 @@ pnpm package:e2e
 pnpm package:mvp
 pnpm package:verified
 pnpm package:compare
+pnpm licenses:collect
+pnpm sbom:generate
+pnpm package:report
+pnpm release:stage
+pnpm diagnostics:collect
+pnpm release:windows:check
+pnpm security:audit
 ```
 
 说明：
@@ -326,3 +339,7 @@ pnpm package:compare
   - macOS：构建 `.app`、签名、校验并生成 `.dmg`；
   - Windows：在 Windows 构建环境中构建 NSIS installer；
 - `pnpm package:verified` 会重建 E2E 和 Release 产物，并执行安全边界比较。
+- `pnpm licenses:collect`、`pnpm sbom:generate`、`pnpm package:report` 和 `pnpm release:stage` 用于准备本地 release 支持资产，不会执行发布；
+- `pnpm diagnostics:collect` 会在 ignored staging 下导出本地脱敏诊断包；
+- `pnpm release:windows:check` 输出 Windows x64 打包路线；在 macOS 上运行时不能被当作 Windows installer 验收通过；
+- `pnpm security:audit` 生成漏洞扫描摘要；需要确定性流水线检查时可使用 `pnpm security:audit -- --dry-run`。

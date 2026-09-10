@@ -1,4 +1,4 @@
-import { cp, mkdir, mkdtemp, rm, symlink } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, rm, symlink } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { tmpdir } from 'node:os'
 import { basename, resolve } from 'node:path'
@@ -17,8 +17,9 @@ if (process.platform !== 'darwin') {
 }
 
 const app = resolve(root, 'src-tauri/target/release/bundle/macos/DeepShell Agent.app')
+const rootPackage = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
 const outputDirectory = resolve(root, 'src-tauri/target/release/bundle/dmg')
-const output = resolve(outputDirectory, 'DeepShell Agent_0.1.0_aarch64.dmg')
+const output = resolve(outputDirectory, `DeepShell Agent_${rootPackage.version}_aarch64.dmg`)
 const staging = await mkdtemp(resolve(tmpdir(), 'deepshell-dmg-'))
 
 try {
