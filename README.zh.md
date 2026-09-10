@@ -12,7 +12,7 @@ DeepShell Agent 不重新实现 Agent Runtime，也不 fork 官方 DSH Web UI。
 
 ## 当前状态
 
-当前源码基线版本为基于 `v0.1.0` MVP（Minimum Viable Product，最小可用版本）的 `v0.1.1` 发布硬化基线。
+当前源码基线版本为基于 `v0.1.0` MVP（Minimum Viable Product，最小可用版本）的 `v0.1.1` 发布硬化版本。基于该基线发布 macOS arm64 developer-preview DMG，并以 GitHub prerelease 形式提供。
 
 已经纳入源码基线的能力：
 
@@ -31,7 +31,7 @@ DeepShell Agent 不重新实现 Agent Runtime，也不 fork 官方 DSH Web UI。
 - 本地脱敏诊断包、包体积报告、SBOM 基线、漏洞扫描入口和 release staging 自动化；
 - E2E/Release 产物安全边界比较。
 
-仍需在正式二进制公开分发前完成：
+仍需在正式签名/公证二进制公开分发前完成：
 
 - Windows x64 真机或 CI 安装包验收；
 - Windows WebView2 首次启动、退出和进程树清理验收；
@@ -73,9 +73,9 @@ Office/PDF/PPTX/XLSX 原生解析、复杂知识库、企业 Connector 和专属
 
 ## 获取与运行
 
-正式公开二进制包发布后，用户应优先从 GitHub Releases 下载对应平台的安装包。
+`v0.1.1` 阶段，macOS arm64 用户可以从 GitHub Releases 下载 developer-preview DMG。正式签名/公证包和 Windows 包仍是独立发布门禁。
 
-当前源码基线的二进制发布门禁尚未全部完成，因此 public repository 主要用于源码公开、架构审查和可复现构建。若你从源码自行构建，请参考本文最后的 “For contributors” 章节。
+当前源码基线的正式二进制分发门禁尚未全部完成，因此 public repository 主要用于源码公开、架构审查和可复现构建。若你从源码自行构建，请参考本文最后的 “For contributors” 章节。
 
 ### macOS 用户
 
@@ -84,9 +84,9 @@ Office/PDF/PPTX/XLSX 原生解析、复杂知识库、企业 Connector 和专属
 - Apple Silicon Mac；
 - macOS 13.0 或更高版本。
 
-正式发布后，macOS 用户应下载 `.dmg`，将 `DeepShell Agent.app` 拖入 Applications 后启动。
+`v0.1.1` 阶段，macOS 用户可下载 developer-preview `.dmg`，将 `DeepShell Agent.app` 拖入 Applications 后启动。
 
-当前源码基线尚未完成 Developer ID 签名和 Apple notarization。公开二进制发布前，需要补齐签名、公证和 Gatekeeper 验证。
+`v0.1.1` developer-preview DMG 已为打包流程做本地签名，但尚未完成 Developer ID 签名和 Apple notarization。macOS 可能显示非 notarized 应用的常规安全提示。正式公开二进制分发前，需要补齐签名、公证和 Gatekeeper 验证。
 
 ### Windows 用户
 
@@ -95,7 +95,7 @@ Office/PDF/PPTX/XLSX 原生解析、复杂知识库、企业 Connector 和专属
 - Windows 10 22H2 或 Windows 11 x64；
 - WebView2 Runtime。
 
-正式发布后，Windows 用户应下载 NSIS installer 并按安装向导安装。
+Windows 正式发布后，Windows 用户应下载 NSIS installer 并按安装向导安装。
 
 当前源码基线已经锁定 Windows x64 runtime 资产，但 Windows installer、WebView2 首次启动、退出和进程树清理仍需在 Windows 真机或 CI 中完成发布验收。
 
@@ -134,7 +134,7 @@ DeepShell Agent 默认沿用 DSH 官方 `workspace-write` Permission Preset：
 - 本地验收证据；
 - 日志、截图、诊断包或任何真实 Secret。
 
-需要对外分发二进制包时，应通过 GitHub Releases 或其他发布渠道单独提供 release artifact，并重新生成对应平台的许可证/NOTICE 清单。
+需要对外分发二进制包时，应通过 GitHub Releases 或其他发布渠道单独提供 release artifact，并重新生成对应平台的许可证/NOTICE 清单、SBOM、package report 和 security audit report。
 
 ## License
 

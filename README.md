@@ -12,7 +12,7 @@ DeepShell Agent does not reimplement the Agent Runtime and does not fork the off
 
 ## Current status
 
-The current source baseline is `v0.1.1` release-hardening baseline on top of the `v0.1.0` MVP (Minimum Viable Product).
+The current source baseline is `v0.1.1`, a release-hardening update on top of the `v0.1.0` MVP (Minimum Viable Product). A macOS arm64 developer-preview DMG is published from this baseline as a GitHub prerelease.
 
 Capabilities already included in the source baseline:
 
@@ -31,7 +31,7 @@ Capabilities already included in the source baseline:
 - redacted local diagnostics, package-size reporting, SBOM baseline, vulnerability-audit entrypoint, and release staging automation;
 - E2E/Release artifact security-boundary comparison.
 
-Still required before formal public binary distribution:
+Still required before formal signed/notarized public binary distribution:
 
 - Windows x64 hardware or CI installer acceptance;
 - Windows WebView2 first-run, shutdown, and process-tree cleanup acceptance;
@@ -73,9 +73,9 @@ Models, routes, base URLs, API keys, and model lists are managed through the off
 
 ## Getting and running
 
-After formal public binary packages are released, users should download the installer for their platform from GitHub Releases.
+For `v0.1.1`, macOS arm64 users can download the developer-preview DMG from GitHub Releases. Formal signed/notarized packages and Windows packages are still separate release gates.
 
-The current source baseline has not completed all binary-release gates. The public repository is primarily for source publication, architecture review, and reproducible builds. If you want to build from source, see “For contributors” below.
+The current source baseline has not completed all formal binary-distribution gates. The public repository is primarily for source publication, architecture review, and reproducible builds. If you want to build from source, see “For contributors” below.
 
 ### macOS users
 
@@ -84,9 +84,9 @@ Target platform:
 - Apple Silicon Mac;
 - macOS 13.0 or later.
 
-After a formal release, macOS users should download the `.dmg`, drag `DeepShell Agent.app` into Applications, and launch it from there.
+For `v0.1.1`, macOS users may download the developer-preview `.dmg`, drag `DeepShell Agent.app` into Applications, and launch it from there.
 
-The current source baseline has not completed Developer ID signing or Apple notarization. Signing, notarization, and Gatekeeper verification are required before public binary distribution.
+The `v0.1.1` developer-preview DMG is locally signed for packaging, but it has not completed Developer ID signing or Apple notarization. macOS may show the usual security warning for non-notarized apps. Signing, notarization, and Gatekeeper verification are required before formal public binary distribution.
 
 ### Windows users
 
@@ -95,7 +95,7 @@ Target platform:
 - Windows 10 22H2 or Windows 11 x64;
 - WebView2 Runtime.
 
-After a formal release, Windows users should download the NSIS installer and install through the setup wizard.
+After a formal Windows release, Windows users should download the NSIS installer and install through the setup wizard.
 
 The current source baseline has locked Windows x64 runtime assets, but the Windows installer, WebView2 first-run behavior, shutdown, and process-tree cleanup still require validation on Windows hardware or CI.
 
@@ -134,7 +134,7 @@ It does not commit:
 - local acceptance evidence;
 - logs, screenshots, diagnostic bundles, or real secrets.
 
-Binary packages should be distributed through GitHub Releases or another release channel. A platform-specific license/NOTICE inventory must be regenerated for each binary release artifact.
+Binary packages should be distributed through GitHub Releases or another release channel. A platform-specific license/NOTICE inventory, SBOM, package report, and security-audit report should be regenerated for each binary release artifact.
 
 ## License
 
