@@ -12,7 +12,7 @@ DeepShell Agent 不重新实现 Agent Runtime，也不 fork 官方 DSH Web UI。
 
 ## 当前状态
 
-当前源码基线版本为 `v0.1.2`，是在 `v0.1.1` 发布硬化基线上的 DSH runtime refresh（运行时刷新）版本。它将固定的 DeepSeek Harness runtime 升级到 `0.1.5-rc.1`，保持官方 Web UI / 官方扩展点架构不变，并为 DSH Session 数据增加有限的升级前备份保护。
+当前源码基线版本为 `v0.1.2`，是在 `v0.1.1` 发布硬化基线上的 DSH runtime refresh（运行时刷新）版本。它将固定的 DeepSeek Harness runtime 升级到 `0.1.5-rc.1`，保持官方 Web UI / 官方扩展点架构不变，为 DSH Session 数据增加有限的升级前备份保护，并以 macOS arm64 developer-preview release 形式分发。
 
 已经纳入源码基线的能力：
 

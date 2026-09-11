@@ -196,7 +196,7 @@ The Status column records current implementation facts and confirmed active-vers
 | SESSION-019 | Session export | Export auditable conversation and run records | P2 | Not started |
 | SESSION-020 | Cross-device Session sync | Sync and restore Sessions across devices | P3 | Not started |
 | SESSION-021 | DSH Session format V3 migration guard | Protect the DSH runtime refresh with scoped pre-upgrade Session backup, non-downgrade warning, and failure-safe messaging | P0 | Implemented (v0.1.2) |
-| SESSION-022 | Real old-session upgrade acceptance | Manually validate that representative `v0.1.1` Sessions open or migrate correctly under `v0.1.2` before tag/release publication | P0 | Not started |
+| SESSION-022 | Real old-session upgrade acceptance | Manually validate that representative `v0.1.1` Sessions open or migrate correctly under `v0.1.2` before promotion beyond developer preview | P0 | Not started |
 
 ### 4.7 Workspace, files, Shell, and Git
 

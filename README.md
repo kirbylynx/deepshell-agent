@@ -12,7 +12,7 @@ DeepShell Agent does not reimplement the Agent Runtime and does not fork the off
 
 ## Current status
 
-The current source baseline is `v0.1.2`, a DSH runtime-refresh update on top of the `v0.1.1` release-hardening baseline. It upgrades the pinned DeepSeek Harness runtime to `0.1.5-rc.1`, keeps the official Web UI / public extension-point architecture unchanged, and adds a bounded pre-upgrade backup guard for DSH Session data.
+The current source baseline is `v0.1.2`, a DSH runtime-refresh update on top of the `v0.1.1` release-hardening baseline. It upgrades the pinned DeepSeek Harness runtime to `0.1.5-rc.1`, keeps the official Web UI / public extension-point architecture unchanged, adds a bounded pre-upgrade backup guard for DSH Session data, and is distributed as a macOS arm64 developer-preview release.
 
 Capabilities already included in the source baseline:
 
