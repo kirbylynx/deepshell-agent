@@ -6,7 +6,7 @@
 >
 > **Tagline:** A desktop agent powered by DeepSeek Harness.
 >
-> **状态：** 功能池、优先级、实现状态与发布规划基线；`v0.0.1` POC 已完成可行性验证，`v0.1.0` MVP 已落地项已标注，选定的 `v0.1.1` 发布硬化项已落地，选定的 `v0.1.2` DSH runtime refresh 项已落地到当前源码基线
+> **状态：** 功能池、优先级、实现状态与发布规划基线；`v0.0.1` POC 已完成可行性验证，`v0.1.0` MVP 已落地项已标注，选定的 `v0.1.1` 发布硬化项已落地，选定的 `v0.1.2` DSH runtime refresh 项已落地到当前源码基线，选定的 `v0.1.3` Windows x64 平台验收项已进入当前规划分支
 >
 > **日期：** 2026-09-10
 
@@ -62,6 +62,7 @@
 - `已实现（v0.1.2）` 表示该功能已在 `v0.1.2` DSH runtime refresh 基线中落地，并纳入当前验证范围。
 - `待实现（v0.1.1）` 表示该功能已进入当前 `v0.1.1` 规划/开发分支，但尚未作为已实现功能落地。
 - `待实现（v0.1.2）` 表示该功能已进入当前 `v0.1.2` DSH runtime refresh 分支，但尚未作为已实现功能落地。
+- `待实现（v0.1.3）` 表示该功能已进入当前 `v0.1.3` Windows x64 平台验收分支，但尚未作为已实现功能落地。
 - `未开始` 表示该 Roadmap 功能项尚未作为完整功能落地；如果某个组合项只完成了一部分，也仍按未完整实现处理。
 - `待实现` 不是实现声明，也不替代需求、设计、实施计划或版本收口文档。
 
@@ -196,7 +197,7 @@
 | SESSION-019 | Session 导出 | 导出可审计的会话与运行记录 | P2 | 未开始 |
 | SESSION-020 | 多机 Session 同步 | 在设备之间同步和恢复 Session | P3 | 未开始 |
 | SESSION-021 | DSH Session format V3 迁移保护 | 通过有限升级前 Session 备份、不可降级提示和失败安全信息保护 DSH runtime refresh | P0 | 已实现（v0.1.2） |
-| SESSION-022 | 真实旧 Session 升级验收 | 提升到 developer preview 之外前，手工验证代表性的 `v0.1.1` Session 可在 `v0.1.2` 下打开或正确迁移 | P0 | 未开始 |
+| SESSION-022 | 真实旧 Session 升级验收 | 提升到 developer preview 之外前，手工验证代表性的 `v0.1.1` Session 可在 `v0.1.2` 下打开或正确迁移 | P0 | 待实现（v0.1.3） |
 
 ### 4.7 Workspace、文件、Shell 与 Git
 
@@ -233,7 +234,7 @@
 | SAFE-009 | 不可信内容清洗 | 安全渲染 Markdown、网页、文档和 Tool Output | P1 | 未开始 |
 | SAFE-010 | Safety Guard | 对删除、批量覆盖和破坏性 Git 追加控制 | P2 | 未开始 |
 | SAFE-011 | Workspace 外读取控制 | 在需要更强数据边界时增加策略 | P2 | 未开始 |
-| SAFE-012 | 平台 Sandbox 能力矩阵 | 展示 macOS/Windows/Linux 实际保护和降级 | P1 | 未开始 |
+| SAFE-012 | 平台 Sandbox 能力矩阵 | 展示 macOS/Windows/Linux 实际保护和降级 | P1 | 待实现（v0.1.3） |
 | SAFE-013 | MCP 权限与来源展示 | 显示命令、URL、工具、凭据和风险 | P1 | 未开始 |
 | SAFE-014 | Plugin 安全策略 | 限制高权限扩展的来源和加载 | P1 | 未开始 |
 | SAFE-015 | SBOM | 生成软件物料清单 | P1 | 已实现（v0.1.1） |
@@ -323,7 +324,7 @@
 | OPS-009 | 配置与数据迁移 | 幂等升级并验证可读性 | P1 | 已实现（v0.1.0） |
 | OPS-010 | 升级前备份与恢复 | 有限备份、失败停止和恢复说明 | P1 | 已实现（v0.1.2） |
 | OPS-011 | 数据清理 | 明确清除 Session、缓存或全部应用数据 | P2 | 未开始 |
-| OPS-012 | 卸载数据保留策略 | 默认保留并提供显式清理方法 | P2 | 未开始 |
+| OPS-012 | 卸载数据保留策略 | 默认保留并提供显式清理方法 | P2 | 待实现（v0.1.3） |
 | OPS-013 | Opt-in 遥测 | 用户主动启用的产品指标 | P3 | 未开始 |
 | OPS-014 | 隐私控制 | 公布字段、目的、保留期和删除方式 | P1 | 未开始 |
 
@@ -344,12 +345,14 @@
 | REL-011 | 原子 Compatibility Set | App、Node、DSH 和 First-party Plugin 同步升级 | P1 | 已实现（v0.1.0） |
 | REL-012 | 数据迁移兼容 | 更新后 Session、Settings 和 Credentials 可读 | P1 | 已实现（v0.1.0） |
 | REL-013 | 安装/升级/卸载验收清单 | 定义可重复的真实产物验收状态和数据保留检查 | P1 | 已实现（v0.1.1） |
-| REL-014 | 跨 WebView 验收 | WKWebView、WebView2 和 WebKitGTK 差异测试 | P1 | 未开始 |
+| REL-014 | 跨 WebView 验收 | WKWebView、WebView2 和 WebKitGTK 差异测试 | P1 | 待实现（v0.1.3） |
 | REL-015 | Mobile | iOS/Android 客户端或伴侣应用 | P3 | 未开始 |
 | REL-016 | Release staging 自动化 | 准备公开 release 资产、校验和、license inventory、SBOM/report 引用和 release notes 草稿，但不执行发布 | P1 | 已实现（v0.1.1） |
-| REL-017 | Windows x64 installer 验收 | 在真实 Windows 或 CI 中验证实际 NSIS installer、WebView2 首启、Session 创建、退出清理和卸载行为 | P1 | 未开始 |
+| REL-017 | Windows x64 installer 验收 | 在真实 Windows 或 CI 中验证实际 NSIS installer、WebView2 首启、Session 创建、退出清理和卸载行为 | P1 | 待实现（v0.1.3） |
 | REL-018 | 签名二进制分发 | 面向普通用户发布已签名/已公证的平台安装包 | P1 | 未开始 |
 | REL-019 | DSH runtime refresh to 0.1.5 | 原子升级 pinned DSH runtime、lockfile、profile、First-party Bundle 兼容、release artifacts 和公开文档到上游 DSH 0.1.5 兼容集 | P0 | 已实现（v0.1.2） |
+| REL-020 | Windows x64 构建环境验收 | 在 Windows x64 真机上实测并记录构建主机前置条件：MSVC C++ 工具集与 Windows SDK 完整性、`rc.exe` 可用性、WebView2 Runtime、PowerShell 解析路径、NSIS 工具链获取方式，以及 `pnpm release:windows:check` 的 preflight 结果 | P1 | 待实现（v0.1.3） |
+| REL-021 | Windows x64 产物清单与安全边界验收能力 | 使 Windows 侧能产出等价结构的产物清单并执行安全边界比较，覆盖测试资源与 E2E 标记检查；改造须保留 macOS 侧既有能力 | P1 | 待实现（v0.1.3） |
 
 ### 4.15 测试与质量保障
 

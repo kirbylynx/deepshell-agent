@@ -6,7 +6,7 @@ Language: English | [简体中文](roadmap.zh.md)
 >
 > **Tagline:** A desktop agent powered by DeepSeek Harness.
 >
-> **Status:** Feature pool, priority, implementation status, and release-planning baseline; `v0.0.1` POC has completed feasibility validation, `v0.1.0` MVP items are marked, selected `v0.1.1` release-hardening items have landed, and selected `v0.1.2` DSH runtime-refresh items have landed in the current source baseline.
+> **Status:** Feature pool, priority, implementation status, and release-planning baseline; `v0.0.1` POC has completed feasibility validation, `v0.1.0` MVP items are marked, selected `v0.1.1` release-hardening items have landed, selected `v0.1.2` DSH runtime-refresh items have landed in the current source baseline, and selected `v0.1.3` Windows x64 platform-acceptance items have entered the current planning branch.
 >
 > **Date:** 2026-09-10
 
@@ -62,6 +62,7 @@ The Status column records current implementation facts and confirmed active-vers
 - `Implemented (v0.1.2)` means the feature has landed in the `v0.1.2` DSH runtime-refresh baseline and is covered by the current validation scope.
 - `Planned (v0.1.1)` means the feature is selected for the active `v0.1.1` planning/development branch, but has not yet landed as an implemented feature.
 - `Planned (v0.1.2)` means the feature is selected for the active `v0.1.2` DSH runtime-refresh branch, but has not yet landed as an implemented feature.
+- `Planned (v0.1.3)` means the feature is selected for the active `v0.1.3` Windows x64 platform-acceptance branch, but has not yet landed as an implemented feature.
 - `Not started` means the Roadmap item has not landed as a complete feature. If a composite item is only partially complete, it is still treated as not fully implemented.
 - A planned status is not an implementation claim and does not replace Release Requirements, Design, Implementation Plan, or release closeout documents.
 
@@ -196,7 +197,7 @@ The Status column records current implementation facts and confirmed active-vers
 | SESSION-019 | Session export | Export auditable conversation and run records | P2 | Not started |
 | SESSION-020 | Cross-device Session sync | Sync and restore Sessions across devices | P3 | Not started |
 | SESSION-021 | DSH Session format V3 migration guard | Protect the DSH runtime refresh with scoped pre-upgrade Session backup, non-downgrade warning, and failure-safe messaging | P0 | Implemented (v0.1.2) |
-| SESSION-022 | Real old-session upgrade acceptance | Manually validate that representative `v0.1.1` Sessions open or migrate correctly under `v0.1.2` before promotion beyond developer preview | P0 | Not started |
+| SESSION-022 | Real old-session upgrade acceptance | Manually validate that representative `v0.1.1` Sessions open or migrate correctly under `v0.1.2` before promotion beyond developer preview | P0 | Planned (v0.1.3) |
 
 ### 4.7 Workspace, files, Shell, and Git
 
@@ -233,7 +234,7 @@ The Status column records current implementation facts and confirmed active-vers
 | SAFE-009 | Untrusted content sanitization | Safely render Markdown, webpages, documents, and Tool Output | P1 | Not started |
 | SAFE-010 | Safety Guard | Add controls for deletion, batch overwrite, and destructive Git operations | P2 | Not started |
 | SAFE-011 | Out-of-workspace read control | Add stronger data-boundary policies when needed | P2 | Not started |
-| SAFE-012 | Platform Sandbox capability matrix | Show actual macOS/Windows/Linux protection and degradation | P1 | Not started |
+| SAFE-012 | Platform Sandbox capability matrix | Show actual macOS/Windows/Linux protection and degradation | P1 | Planned (v0.1.3) |
 | SAFE-013 | MCP permission and source display | Show commands, URLs, tools, credentials, and risks | P1 | Not started |
 | SAFE-014 | Plugin security policy | Restrict sources and loading for high-privilege extensions | P1 | Not started |
 | SAFE-015 | SBOM | Generate a software bill of materials | P1 | Implemented (v0.1.1) |
@@ -323,7 +324,7 @@ The Status column records current implementation facts and confirmed active-vers
 | OPS-009 | Configuration and data migration | Idempotent upgrades with readability verification | P1 | Implemented (v0.1.0) |
 | OPS-010 | Pre-upgrade backup and recovery | Limited backups, fail-stop, and recovery instructions | P1 | Implemented (v0.1.2) |
 | OPS-011 | Data cleanup | Explicitly clear Sessions, cache, or all app data | P2 | Not started |
-| OPS-012 | Uninstall data-retention policy | Retain by default and provide an explicit cleanup method | P2 | Not started |
+| OPS-012 | Uninstall data-retention policy | Retain by default and provide an explicit cleanup method | P2 | Planned (v0.1.3) |
 | OPS-013 | Opt-in telemetry | Product metrics actively enabled by the user | P3 | Not started |
 | OPS-014 | Privacy controls | Publish fields, purposes, retention periods, and deletion method | P1 | Not started |
 
@@ -344,12 +345,14 @@ The Status column records current implementation facts and confirmed active-vers
 | REL-011 | Atomic Compatibility Set | Upgrade App, Node, DSH, and first-party Plugins together | P1 | Implemented (v0.1.0) |
 | REL-012 | Data migration compatibility | Sessions, Settings, and Credentials remain readable after updates | P1 | Implemented (v0.1.0) |
 | REL-013 | Install/upgrade/uninstall acceptance checklist | Define repeatable real-artifact acceptance status and data-retention checks | P1 | Implemented (v0.1.1) |
-| REL-014 | Cross-WebView acceptance | WKWebView, WebView2, and WebKitGTK difference testing | P1 | Not started |
+| REL-014 | Cross-WebView acceptance | WKWebView, WebView2, and WebKitGTK difference testing | P1 | Planned (v0.1.3) |
 | REL-015 | Mobile | iOS/Android client or companion app | P3 | Not started |
 | REL-016 | Release staging automation | Prepare public release assets, checksums, license inventory, SBOM/report references, and release notes drafts without publishing | P1 | Implemented (v0.1.1) |
-| REL-017 | Windows x64 installer validation | Validate the actual NSIS installer, WebView2 first run, Session creation, shutdown cleanup, and uninstall behavior on real Windows or CI | P1 | Not started |
+| REL-017 | Windows x64 installer validation | Validate the actual NSIS installer, WebView2 first run, Session creation, shutdown cleanup, and uninstall behavior on real Windows or CI | P1 | Planned (v0.1.3) |
 | REL-018 | Signed binary distribution | Publish signed/notarized platform installers for general users | P1 | Not started |
 | REL-019 | DSH runtime refresh to 0.1.5 | Atomically upgrade pinned DSH runtime, lockfiles, profile, first-party Bundle compatibility, release artifacts, and public docs to the upstream DSH 0.1.5 compatibility set | P0 | Implemented (v0.1.2) |
+| REL-020 | Windows x64 build-environment acceptance | Measure and record build-host prerequisites on real Windows x64: MSVC C++ toolset and Windows SDK completeness, `rc.exe` availability, WebView2 Runtime, PowerShell resolution path, how the NSIS toolchain is obtained, and the `pnpm release:windows:check` preflight result | P1 | Planned (v0.1.3) |
+| REL-021 | Windows x64 package-manifest and security-boundary acceptance capability | Enable the Windows side to produce an equivalently structured package manifest and run security-boundary comparison, covering test-resource and E2E-marker checks; the change must preserve the existing macOS-side capability | P1 | Planned (v0.1.3) |
 
 ### 4.15 Testing and quality assurance
 
