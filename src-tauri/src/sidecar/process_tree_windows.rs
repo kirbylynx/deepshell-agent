@@ -1,5 +1,6 @@
 use crate::error::{AppError, ErrorCode};
 use serde::{Deserialize, Serialize};
+use std::os::windows::process::CommandExt;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -9,6 +10,25 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::AppHandle;
+
+/// `CreateProcess` 标志：不给子进程分配可见的控制台窗口。
+///
+/// 本应用是 **GUI 子系统**（`windows_subsystem = "windows"`，自身没有控制台），
+/// 而 `taskkill` / `powershell.exe` 都是**控制台程序**。按 Windows 语义，
+/// 无控制台的父进程启动控制台子进程时系统会**新建一个可见的控制台窗口**；
+/// 由于这些子进程的 stdout/stderr 已被管道或 `output()` 接管，窗口内空无一物
+/// —— 用户看到的就是"启动时冒出一个什么都不显示的命令行窗口"
+/// （真机验收实测暴露；sidecar 本身已由 `sidecar::command` 单独设置该标志）。
+///
+/// 这些调用全部是**无界面的后台工具**，因此统一隐藏。
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// 构造一个**不显示控制台窗口**的命令。
+fn console_command(program: &str) -> Command {
+    let mut command = Command::new(program);
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -190,7 +210,7 @@ fn terminate_pid_tree(
     deadline: Instant,
     abort_on_shutdown: Option<&AtomicBool>,
 ) -> Result<(), AppError> {
-    let _ = Command::new("taskkill")
+    let _ = console_command("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .output();
     while Instant::now() < deadline {
@@ -216,7 +236,7 @@ fn terminate_pid_tree(
 }
 
 fn process_alive(pid: u32) -> bool {
-    Command::new("powershell.exe")
+    console_command("powershell.exe")
         .args([
             "-NoProfile",
             "-ExecutionPolicy",
@@ -229,7 +249,7 @@ fn process_alive(pid: u32) -> bool {
 }
 
 fn verify_executable_if_available(pid: u32, expected: &Path) -> Result<(), AppError> {
-    let output = Command::new("powershell.exe")
+    let output = console_command("powershell.exe")
         .args([
             "-NoProfile",
             "-ExecutionPolicy",

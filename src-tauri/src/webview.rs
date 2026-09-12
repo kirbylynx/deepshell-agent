@@ -48,7 +48,7 @@ impl WebviewPolicy {
     }
 
     pub fn classify(&self, url: &Url) -> NavigationDecision {
-        if matches!(url.scheme(), "tauri" | "asset") {
+        if is_app_origin(url) {
             return NavigationDecision::AllowBootstrap;
         }
         #[cfg(debug_assertions)]
@@ -71,8 +71,37 @@ impl WebviewPolicy {
         }
     }
 
+    /// DSH 页面判定：必须是已登记的 DSH origin，且不带认证 query。
+    ///
+    /// ⚠️ 实现上**必须**先判 origin、再判 query，且 origin 判定走 `self.dsh_origin`
+    /// 而非 `classify()`——`classify()` 还会把应用自身 origin 判为可导航
+    /// （见 `is_app_origin`），若复用其 `AllowDsh` 分支会把 bootstrap 页面误认为 DSH 页面。
+    ///
+    /// ⚠️ 但 `AllowBootstrap` 与 `AllowDsh` 是**两个不同分支**，因此原先
+    /// `classify(url) == AllowDsh` 的写法本就不会把 bootstrap 页面算作 DSH 页面；
+    /// 曾经一度改写为"直接比对 origin"的等价形式，实测导致就绪路径不再达成
+    /// （`runtime_ready` 消失），已回退为原写法。改动此处须实跑验证就绪路径。
     pub fn is_clean_dsh_page(&self, url: &Url) -> bool {
         self.classify(url) == NavigationDecision::AllowDsh && url.query().is_none()
+    }
+}
+
+/// 是否为**应用自身**的 origin（即打包进包内的 bootstrap 页面）。
+///
+/// ⚠️ 平台差异：Tauri 2 在 macOS 上用自定义协议 `tauri://localhost`，
+/// 而在 **Windows/Linux 上用 `http://tauri.localhost`**（`https://tauri.localhost` 亦见）。
+/// 早期实现只匹配 `tauri` / `asset` 协议，于是 Windows 上应用自身的 URL 落到
+/// `http` 分支被判为 `OpenExternal` → `on_navigation` 调 `open_external` 用
+/// `rundll32` 打开系统浏览器，用户看到浏览器被打开一个 `tauri.localhost` 页面
+/// 且必然打不开（真机验收实测暴露）。
+///
+/// 安全性：该 origin 由 Tauri 的自定义协议处理器提供，只服务包内资产，不是外部网站；
+/// 放行它不会把任意远程页面引入 WebView。真正的远程页面仍走 `OpenExternal`。
+fn is_app_origin(url: &Url) -> bool {
+    match url.scheme() {
+        "tauri" | "asset" => true,
+        "http" | "https" => matches!(url.host_str(), Some("tauri.localhost")),
+        _ => false,
     }
 }
 
@@ -181,5 +210,52 @@ mod tests {
         policy.set_dsh_origin(&url).unwrap();
         policy.clear_dsh_origin();
         assert_eq!(policy.classify(&url), NavigationDecision::OpenExternal);
+    }
+
+    /// 应用自身的 origin 必须留在 WebView 内，且**不得**被判为可交给系统浏览器。
+    /// Windows 上的 app 协议是 `http://tauri.localhost`（macOS 为 `tauri://localhost`）；
+    /// 漏判会导致启动时浏览器被打开一个打不开的 `tauri.localhost` 页面（真机实测暴露）。
+    #[test]
+    fn app_origins_stay_in_webview() {
+        let policy = WebviewPolicy::default();
+        for url in [
+            "http://tauri.localhost/",
+            "http://tauri.localhost/index.html",
+            "https://tauri.localhost/",
+            "tauri://localhost/",
+            "asset://localhost/",
+        ] {
+            assert_eq!(
+                policy.classify(&Url::parse(url).unwrap()),
+                NavigationDecision::AllowBootstrap,
+                "{url} 应留在 WebView 内"
+            );
+        }
+        // 相似但不同的主机不得被放行
+        for url in [
+            "http://tauri.localhost.evil.example/",
+            "http://evil.example/",
+            "http://127.0.0.1:43124/",
+        ] {
+            assert_eq!(
+                policy.classify(&Url::parse(url).unwrap()),
+                NavigationDecision::OpenExternal,
+                "{url} 应交给系统浏览器"
+            );
+        }
+    }
+
+    /// `is_clean_dsh_page` 只认已登记的 DSH origin；bootstrap origin 不算 DSH 页面。
+    #[test]
+    fn clean_page_excludes_bootstrap_origin() {
+        let policy = WebviewPolicy::default();
+        policy
+            .set_dsh_origin(&Url::parse("http://127.0.0.1:43123/").unwrap())
+            .unwrap();
+        // bootstrap origin 走 AllowBootstrap 分支，不是 AllowDsh
+        assert!(!policy.is_clean_dsh_page(&Url::parse("http://tauri.localhost/").unwrap()));
+        assert!(!policy.is_clean_dsh_page(&Url::parse("tauri://localhost/").unwrap()));
+        let fresh = WebviewPolicy::default();
+        assert!(!fresh.is_clean_dsh_page(&Url::parse("http://tauri.localhost/").unwrap()));
     }
 }

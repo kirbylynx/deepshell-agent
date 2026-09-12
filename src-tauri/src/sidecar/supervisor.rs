@@ -610,7 +610,7 @@ impl Supervisor {
         let window = app
             .get_webview_window("main")
             .ok_or_else(|| AppError::new(ErrorCode::RuntimeUnavailable, "主窗口不存在"))?;
-        let url = Url::parse("tauri://localhost/index.html")
+        let url = bootstrap_url()
             .map_err(|error| AppError::new(ErrorCode::RuntimeUnavailable, error.to_string()))?;
         window
             .navigate(url)
@@ -795,6 +795,24 @@ fn write_sidecar_stderr_diagnostic(logs: &Path, tail: &Arc<Mutex<Vec<u8>>>) {
         return;
     }
     let _ = fs::write(logs.join("sidecar-stderr.log"), &*held);
+}
+
+/// 应用自身 bootstrap 页面的 URL。
+///
+/// ⚠️ **平台差异**（与 Tauri 2 的 `Manager::tauri_protocol_url` 一致，该函数为
+/// `pub(crate)` 无法直接调用）：
+/// - **Windows / Android**：`wry` 的 workaround 形式 `http://tauri.localhost`；
+/// - macOS / iOS：自定义协议 `tauri://localhost`。
+///
+/// 早期实现硬编码 `tauri://localhost/index.html`，于是 **Windows 上的失败/引导窗口
+/// 指向一个不存在的协议**，既无法导航、又会被导航策略判为外链
+/// （真机验收实测暴露，与 `webview::is_app_origin` 是同一处平台差异）。
+fn bootstrap_url() -> Result<Url, url::ParseError> {
+    if cfg!(any(windows, target_os = "android")) {
+        Url::parse("http://tauri.localhost/index.html")
+    } else {
+        Url::parse("tauri://localhost/index.html")
+    }
 }
 
 fn consume_restart_budget(window: &mut Option<Instant>, now: Instant) -> bool {
