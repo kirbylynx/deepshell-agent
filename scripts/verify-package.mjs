@@ -80,11 +80,11 @@ if (adapter.platform === 'darwin') {
   throw new Error(`Windows 产物签名状态意外：${adapter.signing.status}`)
 }
 
-// 「测试资源不得进入产物」检查。截断基准取适配器的 resourcesRoot（不再硬编码 app 路径长度）。
-const resourceHits = await findTestResources(
-  adapter.requiredArtifacts.length > 0 ? adapter.requiredArtifactsBase : adapter.resourcesRoot,
-  adapter.requiredArtifacts.length > 0 ? adapter.requiredArtifactsBase : adapter.resourcesRoot
-)
+// 「测试资源不得进入产物」检查。截断基准取适配器的 intermediateRoot（不再硬编码 app 路径长度）：
+// macOS 上它是产物内的 `Contents/Resources`；Windows 上它是 NSIS **构建中间目录**（语义近似，
+// 见 `package-platform.mjs` 的实测③声明）。
+const scanRoot = adapter.intermediateRoot
+const resourceHits = await findTestResources(scanRoot, scanRoot)
 if (adapter.platform === 'darwin') {
   if (resourceHits.length > 0) throw new Error(`Release 包含测试资源：${resourceHits[0].path}`)
 } else if (resourceHits.length > 0) {
@@ -94,7 +94,11 @@ if (adapter.platform === 'darwin') {
   throw new Error(`NSIS 构建中间目录含测试资源标记（近似检查，需人工判定）：\n${details}`)
 }
 
+// 统计产物内的文件数。macOS 的 `.app` 是目录（递归计数）；Windows 的主产物是**单个安装包文件**
+// （计数 1）——不区分会导致 `readdir` 对文件抛 ENOTDIR（P6 实测）。
 async function scan(path) {
+  const metadata = await stat(path)
+  if (metadata.isFile()) return 1
   let count = 0
   for (const entry of await readdir(path, { withFileTypes: true })) {
     const child = resolve(path, entry.name)

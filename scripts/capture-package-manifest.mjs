@@ -20,11 +20,15 @@ if (!['e2e', 'release'].includes(mode)) throw new Error('用法：capture-packag
 const execFileAsync = promisify(execFile)
 const lock = await readLock()
 const adapter = packageAdapter(process.platform, lock)
-const resources = adapter.resourcesRoot
+// 打包资源（**打包输入**）：macOS 在产物内，Windows 是仓库的 `runtime/`。
+const stagedResources = adapter.resourcesRoot
+// 可遍历的"产物资源树"：macOS 与上面同一个目录；Windows 没有资源树 → 用 NSIS 构建中间目录近似。
+const artifactResources = adapter.intermediateRoot
 
 // 清单的来源是真实产物，因此先如实报告缺失，而不是在读取二进制时抛出裸 ENOENT。
 await requireArtifactReady(adapter, access)
-await access(resources)
+await access(stagedResources)
+await access(artifactResources)
 
 function digest(content) {
   return createHash('sha256').update(content).digest('hex')
@@ -62,7 +66,7 @@ const [markerText, { stdout: cargoMetadata }, { stdout: cargoFeatureTree }, conf
   execFileAsync('cargo', ['tree', '--locked', '--manifest-path', resolve(root, 'src-tauri/Cargo.toml'), '-e', 'features', ...featureArgs], { maxBuffer: 64 * 1024 * 1024 }),
   readFile(resolve(root, 'src-tauri/tauri.conf.json')),
   readFile(resolve(root, 'src-tauri/capabilities/main.json')),
-  readFile(resolve(resources, 'runtime/profile-template/template-manifest.json')),
+  readFile(resolve(stagedResources, 'runtime/profile-template/template-manifest.json')),
 ])
 const [cargoToml, cargoLock, sourceInputSha256] = await Promise.all([
   readFile(resolve(root, 'src-tauri/Cargo.toml')),
@@ -119,8 +123,9 @@ const manifest = {
   e2eStopCommandMarker: markerText.includes('poc_e2e_stop_runtime'),
   ...platformSpecific,
   configSources: ['src-tauri/tauri.conf.json'],
-  // Windows 侧为 NSIS 构建中间目录的文件清单 → 语义近似，不能证明压缩包内部内容（设计 §4.4）。
-  resources: await fileManifest(resources)
+  // macOS：产物内 `Contents/Resources` 的真实文件清单。
+  // Windows：NSIS **构建中间目录**的文件清单 → **语义近似**，不能证明压缩包内部内容（设计 §4.4）。
+  resources: await fileManifest(artifactResources)
 }
 if (manifest.buildProfile !== (mode === 'e2e' ? 'poc-e2e' : 'release')) {
   throw new Error(`实际 binary build profile 与 ${mode} 清单不一致`)

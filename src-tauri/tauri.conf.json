@@ -38,7 +38,7 @@
         "type": "embedBootstrapper"
       },
       "nsis": {
-        "installerIcon": "icons/icon.png",
+        "installerIcon": "icons/icon.ico",
         "displayLanguageSelector": false
       }
     }

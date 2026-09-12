@@ -353,6 +353,8 @@
 | REL-019 | DSH runtime refresh to 0.1.5 | 原子升级 pinned DSH runtime、lockfile、profile、First-party Bundle 兼容、release artifacts 和公开文档到上游 DSH 0.1.5 兼容集 | P0 | 已实现（v0.1.2） |
 | REL-020 | Windows x64 构建环境验收 | 在 Windows x64 真机上实测并记录构建主机前置条件：MSVC C++ 工具集与 Windows SDK 完整性、`rc.exe` 可用性、WebView2 Runtime、PowerShell 解析路径、NSIS 工具链获取方式，以及 `pnpm release:windows:check` 的 preflight 结果 | P1 | 待实现（v0.1.3） |
 | REL-021 | Windows x64 产物清单与安全边界验收能力 | 使 Windows 侧能产出等价结构的产物清单并执行安全边界比较，覆盖测试资源与 E2E 标记检查；改造须保留 macOS 侧既有能力 | P1 | 待实现（v0.1.3） |
+| REL-022 | 按平台裁剪运行时打包 | 各平台安装包只打包**自己实际需要**的 Node 运行时，而不是把每个平台的运行时都塞进每个安装包。`v0.1.3` Windows NSIS 安装包实测：安装后 32226 个文件 / 512 MB，其中 `runtime/node/darwin-arm64` 占 4800 个文件 / 187.5 MB，而 Windows 永不使用它；macOS `.app` 存在对称的 `win32-x64` 浪费。修复需在 `tauri.conf.json` 中按平台条件化 `bundle.resources` 映射，**并同步修改** `verify-package.mjs` 中"同一产物内必须同时存在两平台运行时"的必需项断言。**不得**通过移除官方 DSH 核心运行时能力来达成 | P1 | 未开始 |
+| REL-023 | Windows x64 免安装 ZIP 版 | 在 NSIS 安装包之外**再产出一个 Windows x64 免安装 ZIP**（解压即用、无需安装），面向试用评估、受限机器、以及无法运行安装程序的用户。需先决策并记录：(1) 便携运行的数据存放位置——沿用安装版的 `%APPDATA%\com.deepshell.agent`，还是改为随便携目录走的独立路径（`paths.rs` 目前一切都由 Tauri 的 `app_data_dir()` 推导）；(2) 因没有卸载程序，需明确清理指引；(3) 如何避免写注册表（当前卸载项仅由 NSIS 安装器写入）与创建快捷方式；(4) 是否允许与已安装副本共存而不发生 Session/凭据冲突。必须复用既有的 release-staging 多产物暂存与产物清单检查，**不得**另造一套清单 | P1 | 未开始 |
 
 ### 4.15 测试与质量保障
 

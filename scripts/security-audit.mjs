@@ -8,6 +8,17 @@ import { redactedJson } from './lib/redaction.mjs'
 const execFileAsync = promisify(execFile)
 const dryRun = process.argv.includes('--dry-run')
 
+// Windows 上 pnpm/npm 都是 `.cmd` 批处理，而 Node 出于安全考虑（CVE-2024-27980）
+// 拒绝在未启用 shell 时启动 `.cmd`/`.bat`——`spawn` 与 `execFile` 均报 `spawn EINVAL`。
+// 因此经 `cmd.exe /d /s /c` 启动；**不使用** `shell: true`，避免参数拼接引发的 DEP0190。
+// Unix 上两者都是可执行脚本，走原路径。
+function execPlan(command, args) {
+  if (process.platform === 'win32' && command.endsWith('.cmd')) {
+    return ['cmd.exe', ['/d', '/s', '/c', command, ...args]]
+  }
+  return [command, args]
+}
+
 async function exists(path) {
   try {
     await access(path)
@@ -54,13 +65,20 @@ function parseAuditJson(text) {
 async function runAudit(label, command, args, options = {}) {
   if (dryRun) return { label, status: 'dry-run', command: [command, ...args].join(' ') }
   try {
-    const { stdout } = await execFileAsync(command, args, { ...options, maxBuffer: 64 * 1024 * 1024 })
+    const { stdout } = await execFileAsync(...execPlan(command, args), { ...options, maxBuffer: 64 * 1024 * 1024 })
     return { label, ...parseAuditJson(stdout) }
   } catch (error) {
     if (error.code === 'ENOENT') return { label, status: 'tool-missing', install: label === 'rust' ? 'cargo install cargo-audit' : undefined }
     const stderr = String(error.stderr ?? '')
     if (label === 'rust' && /no such command:\s*`audit`|no such command:\s*'audit'|no such command:\s+"audit"/i.test(stderr)) {
       return { label, status: 'tool-missing', install: 'cargo install cargo-audit' }
+    }
+    // ⚠️ 审计命令**根本没启动**时（如 Windows 上直接 spawn `.cmd` 报 `EINVAL`），
+    // stdout 为空 → `parseAuditJson('')` 返回 `completed` + 零漏洞，形成**假通过**。
+    // 这类失败必须如实报为 failed，不得参与任何 gate 判定。
+    // 判定依据：error.code 为**字符串**表示系统级错误；真实审计失败时是**数字**退出码。
+    if (typeof error.code === 'string') {
+      return { label, status: 'failed', error: { code: error.code, summary: String(error.message ?? '').split('\n')[0] } }
     }
     const parsed = parseAuditJson(String(error.stdout ?? ''))
     return { label, ...parsed, exitCode: error.code ?? 1 }
