@@ -327,9 +327,9 @@ fn write_registry(
         fs::write(
             &temporary,
             serde_json::to_vec(registry)
-                .map_err(|error| AppError::new(error_code.clone(), error.to_string()))?,
+                .map_err(|error| AppError::new(error_code, error.to_string()))?,
         )
-        .map_err(|error| AppError::new(error_code.clone(), error.to_string()))?;
+        .map_err(|error| AppError::new(error_code, error.to_string()))?;
         fs::rename(&temporary, path).map_err(|error| AppError::new(error_code, error.to_string()))
     })();
     if result.is_err() {

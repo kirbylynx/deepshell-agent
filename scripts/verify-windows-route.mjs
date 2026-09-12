@@ -7,13 +7,37 @@ import { redactedJson } from './lib/redaction.mjs'
 
 const execFileAsync = promisify(execFile)
 
-async function commandVersion(command, args = ['--version']) {
-  try {
-    const { stdout, stderr } = await execFileAsync(command, args, { timeout: 15_000 })
-    return { status: 'present', output: `${stdout}${stderr}`.trim().split(/\r?\n/)[0] ?? '' }
-  } catch (error) {
-    return { status: 'missing', message: error.code === 'ENOENT' ? 'command not found' : error.message }
+// 探测命令是否存在并取一行版本信息。
+// 约束：Node 出于安全考虑（CVE-2024-27980）拒绝在未启用 shell 时启动 .cmd/.bat，
+// 在 Windows 上会以 spawn EINVAL 失败，而 pnpm 正是 pnpm.cmd。此处**不使用 shell: true**
+// —— 那会触发 DEP0190 安全警告。改为经 `cmd.exe /d /s /c` 启动批处理；命令名是硬编码
+// 常量、参数为固定量，不存在注入输入，故构造命令行是安全的。
+// 存在性统一由 `where.exe` 判定，从而不依赖各命令自身的退出码约定
+// （例如 `cl.exe /?` 返回 2，若按退出码判定会被误报为 missing）。
+async function probeCommand(command, args = ['--version']) {
+  const isWindows = process.platform === 'win32'
+  const isWindowsBatch = isWindows && /\.(cmd|bat)$/i.test(command)
+  const comSpec = process.env.ComSpec ?? 'cmd.exe'
+  const run = async (executable, runArgs) => {
+    try {
+      const { stdout, stderr } = await execFileAsync(executable, runArgs, { timeout: 15_000 })
+      return { ok: true, output: `${stdout}${stderr}`.trim() }
+    } catch (error) {
+      return { ok: false, message: error.code === 'ENOENT' ? 'command not found' : error.message }
+    }
   }
+
+  if (isWindows) {
+    const located = await run(comSpec, ['/d', '/s', '/c', 'where.exe', command])
+    if (!located.ok || !located.output) return { status: 'missing', message: 'command not found' }
+  }
+
+  const result = isWindowsBatch
+    ? await run(comSpec, ['/d', '/s', '/c', [command, ...args].join(' ')])
+    : await run(command, args)
+  if (!result.ok) return { status: 'missing', message: result.message }
+  const line = result.output.split(/\r?\n/).find(value => value.trim().length > 0) ?? ''
+  return { status: 'present', output: line }
 }
 
 async function registryValuePresent(key, valueName) {
@@ -62,11 +86,11 @@ const checks = {
   platform: process.platform === 'win32' && process.arch === 'x64'
     ? { status: 'pass', current: `${process.platform}-${process.arch}` }
     : { status: 'unable-current-platform', current: `${process.platform}-${process.arch}`, required: 'win32-x64' },
-  pnpm: await commandVersion(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'),
-  rustc: await commandVersion('rustc'),
-  cargo: await commandVersion('cargo'),
+  pnpm: await probeCommand(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'),
+  rustc: await probeCommand('rustc'),
+  cargo: await probeCommand('cargo'),
   msvc: process.platform === 'win32'
-    ? await commandVersion('cl.exe', ['/?'])
+    ? await probeCommand('cl.exe', [])
     : { status: 'not-checked-current-platform' },
   webview2: await webview2Runtime(),
 }

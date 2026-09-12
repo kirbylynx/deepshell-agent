@@ -1,4 +1,4 @@
-import { chmod, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { access, chmod, cp, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -25,6 +25,15 @@ function run(executable, args, options = {}) {
 }
 
 const lock = await readLock()
+
+async function exists(path) {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
+}
 const requestedTarget = parseTargetArg()
 const targets = requestedTarget === 'all' ? supportedPlatforms : [requestedTarget]
 assertExactVersion(lock.node.version, 'Node')
@@ -32,6 +41,10 @@ assertExactVersion(lock.dsh.version, 'DSH')
 const cache = resolve(root, 'runtime/cache')
 const dshTarget = resolve(root, 'runtime/dsh')
 const dshInstall = resolve(root, 'runtime/manifest/dsh-install')
+// Node 解压的暂存目录：必须与 runtime/node 同卷，否则 Windows 的 rename 会因
+// 跨卷（EXDEV）失败——系统临时目录常位于与项目不同的盘符。复用已 gitignore 的
+// runtime/cache 作为基目录，既保证同卷又不污染工作区状态。
+const tempRoot = resolve(cache, 'staging')
 await mkdir(cache, { recursive: true })
 
 async function download(url, destination) {
@@ -73,7 +86,10 @@ async function prepareNode(target) {
   if (await sha256(archive) !== nodeConfig.sha256) throw new Error(`${target} Node 发行物 SHA-256 不匹配`)
 
   const nodeTarget = nodeTargetDirectory(target)
-  const nodeStaging = await mkdtemp(resolve(tmpdir(), `deepshell-node-${target}-`))
+  // 临时目录必须与目标同卷：Windows 的 rename 不支持跨卷（EXDEV），
+  // 而系统临时目录常位于与项目不同的盘符。改为项目内临时目录以保证同卷。
+  await mkdir(tempRoot, { recursive: true })
+  const nodeStaging = await mkdtemp(resolve(tempRoot, `node-${target}-`))
   try {
     await extractArchive(nodeConfig, archive, nodeStaging, target)
     await rm(nodeTarget, { recursive: true, force: true })
@@ -99,7 +115,17 @@ try {
   await cp(resolve(dshInstall, 'package.json'), resolve(dshStaging, 'package.json'))
   await cp(resolve(dshInstall, 'package-lock.json'), resolve(dshStaging, 'package-lock.json'))
   const node = nodeExecutablePath(lock, hostTarget)
-  const npmCli = resolve(nodeTargetDirectory(hostTarget), 'lib/node_modules/npm/bin/npm-cli.js')
+  // npm 入口位置随平台不同：Unix 在 lib/node_modules/npm，
+  // Windows 官方 zip 直接在 node_modules/npm（无 lib/ 层）。
+  const npmCandidates = [
+    resolve(nodeTargetDirectory(hostTarget), 'lib/node_modules/npm/bin/npm-cli.js'),
+    resolve(nodeTargetDirectory(hostTarget), 'node_modules/npm/bin/npm-cli.js')
+  ]
+  let npmCli = null
+  for (const candidate of npmCandidates) {
+    if (await exists(candidate)) { npmCli = candidate; break }
+  }
+  if (npmCli === null) throw new Error(`未找到 npm CLI 入口，已尝试：${npmCandidates.join(' | ')}`)
   await run(node, [npmCli, 'ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: dshStaging })
   await rm(dshTarget, { recursive: true, force: true })
   await mkdir(dshTarget, { recursive: true })
