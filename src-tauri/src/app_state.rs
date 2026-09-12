@@ -19,6 +19,23 @@ impl AppState {
         policy: Arc<WebviewPolicy>,
     ) -> Result<Self, AppError> {
         let paths = AppPaths::new(app_data_root, resource_root)?;
+        // 记录解析后的关键路径：真机验收时曾出现 sidecar 以畸形路径启动
+        // （node 报 `EISDIR: lstat 'D:'`），而日志里没有任何路径信息、无法定位。
+        // 这些路径由本应用按固定规则拼接、不含凭据，可安全记录。
+        let _ = crate::logging::record_detailed(
+            &paths.logs,
+            "info",
+            "runtime_paths_resolved",
+            None,
+            None,
+            Some(&format!(
+                "node={} dshEntry={} workspace={} dshHome={}",
+                paths.node.display(),
+                paths.dsh_entry.display(),
+                paths.workspace.display(),
+                paths.dsh_home.display()
+            )),
+        );
         Ok(Self {
             logs: paths.logs.clone(),
             supervisor: Supervisor::new(paths, policy),

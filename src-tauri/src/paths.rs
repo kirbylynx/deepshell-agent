@@ -12,6 +12,36 @@ const PREVIOUS_DSH_VERSION_FOR_SESSION_BACKUP: &str = "0.1.2-rc.1";
 const TARGET_DSH_VERSION_FOR_SESSION_BACKUP: &str = "0.1.5-rc.1";
 const MAX_SESSION_BACKUPS: usize = 3;
 
+/// 去掉 Windows 的**逐字（verbatim）路径前缀** `\\?\`。
+///
+/// Tauri 的 `app.path().resource_dir()` 会返回带该前缀的路径（如 `\\?\D:\app`）。
+/// Windows API 接受它，但 **Node.js 的模块解析不接受**：`resolveMainPath` 内部对主模块
+/// 路径调用 `realpathSync`，遇到 `\\?\D:\app\runtime\...\bin.js` 会把盘符截成 `D:`
+/// 并抛 `EISDIR: illegal operation on a directory, lstat 'D:'`，导致 Sidecar **无法启动**。
+///
+/// 该前缀只是"关闭路径规范化"的标记，去掉后除超长路径（>260 字符）与尾部空格/点等
+/// 边缘情形外语义等价；本应用的安装路径远短于此。UNC 形式 `\\?\UNC\server\share`
+/// 需还原为 `\\server\share`。
+///
+/// Unix 上原样返回。
+#[cfg(windows)]
+fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    let text = path.as_os_str().to_string_lossy();
+    let stripped = if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{rest}")
+    } else if let Some(rest) = text.strip_prefix(r"\\?\") {
+        rest.to_owned()
+    } else {
+        return path;
+    };
+    PathBuf::from(stripped)
+}
+
+#[cfg(not(windows))]
+fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+    path
+}
+
 #[derive(Clone)]
 pub struct AppPaths {
     pub app_data: PathBuf,
@@ -29,6 +59,10 @@ pub struct AppPaths {
 
 impl AppPaths {
     pub fn new(app_data: PathBuf, resources: PathBuf) -> Result<Self, AppError> {
+        // 必须在拼接之前去掉 `\\?\` 前缀：该前缀会被 `join` 继承，一旦进入 Sidecar 的
+        // 参数就会让 Node 无法解析（见 `strip_verbatim_prefix` 的说明）。
+        let app_data = strip_verbatim_prefix(app_data);
+        let resources = strip_verbatim_prefix(resources);
         if !app_data.is_absolute() || !resources.is_absolute() {
             return Err(AppError::new(
                 ErrorCode::RuntimeUnavailable,
@@ -577,6 +611,53 @@ mod tests {
     #[test]
     fn rejects_relative_roots() {
         assert!(AppPaths::new("relative".into(), "relative".into()).is_err());
+    }
+
+    /// 逐字前缀必须被剥离：Tauri 的 `resource_dir()` 带 `\\?\`，而 Node 的模块解析
+    /// 无法处理它（会截成 `D:` 并抛 `EISDIR`），导致 Sidecar 启动失败。
+    #[test]
+    fn strips_verbatim_prefix_from_resolved_paths() {
+        #[cfg(windows)]
+        {
+            assert_eq!(
+                strip_verbatim_prefix(PathBuf::from(r"\\?\D:\app\runtime")),
+                PathBuf::from(r"D:\app\runtime")
+            );
+            // UNC 形式需还原为 `\\server\share`，而不是 `server\share`
+            assert_eq!(
+                strip_verbatim_prefix(PathBuf::from(r"\\?\UNC\server\share\runtime")),
+                PathBuf::from(r"\\server\share\runtime")
+            );
+            // 无前缀时原样返回
+            assert_eq!(
+                strip_verbatim_prefix(PathBuf::from(r"D:\app\runtime")),
+                PathBuf::from(r"D:\app\runtime")
+            );
+            // 拼接后不得再出现 `\\?\`
+            let paths = AppPaths::new(
+                PathBuf::from(r"\\?\C:\data\app"),
+                PathBuf::from(r"\\?\D:\app"),
+            )
+            .unwrap();
+            assert!(!paths.node.to_string_lossy().contains(r"\\?\"));
+            assert!(!paths.workspace.to_string_lossy().contains(r"\\?\"));
+            assert_eq!(
+                paths.dsh_entry,
+                PathBuf::from(r"D:\app\runtime\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js")
+            );
+            assert_eq!(
+                paths.node,
+                PathBuf::from(r"D:\app\runtime\node\win32-x64\node.exe")
+            );
+        }
+        #[cfg(not(windows))]
+        {
+            let paths = AppPaths::new(PathBuf::from("/data/app"), PathBuf::from("/app")).unwrap();
+            assert_eq!(
+                paths.dsh_entry,
+                PathBuf::from("/app/runtime/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js")
+            );
+        }
     }
 
     fn create_minimal_runtime(resources: &Path) {

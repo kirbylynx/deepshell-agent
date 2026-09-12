@@ -7,8 +7,10 @@ use crate::{
 };
 use serde::Serialize;
 use std::{
+    fs,
     io::{BufRead, BufReader, Read},
     net::{Ipv4Addr, SocketAddrV4, TcpStream},
+    path::{Path, PathBuf},
     process::Child,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
@@ -101,7 +103,10 @@ impl Supervisor {
     pub fn record_failure(&self, error: &AppError, startup: bool) {
         let phase = failure_phase(error, startup);
         let token_state = failure_token_state(error, startup);
-        let _ = logging::record(
+        // 把失败原因的文字说明一并写入日志。此前只记 `errorCode`，导致现场只剩
+        // `runtime_start_failed` 一个代号、无法定位（本机 Windows 验收实测暴露）。
+        // 该文本全部由本应用构造，且经 logging 层的最小脱敏，不含凭据。
+        let _ = logging::record_detailed(
             &self.paths.logs,
             "error",
             if phase == RuntimePhase::StartupFailed {
@@ -110,6 +115,8 @@ impl Supervisor {
                 "runtime_failed"
             },
             Some(error.code()),
+            None,
+            Some(error.user_message()),
         );
         *self
             .snapshot
@@ -173,6 +180,10 @@ impl Supervisor {
                 )
             })?;
         let pid = child.id();
+        // sidecar 的 stderr 此前被**整段丢弃**，导致启动失败时现场没有任何线索
+        // （本机 Windows 验收实测：日志只剩 `runtime_start_failed` 一个代号）。
+        // 在 `try_wait` 之前就开始持续读取并保留尾部，供失败时落盘诊断。
+        let stderr_tail = child.stderr.take().map(capture_stderr_tail);
         if let Err(registration_error) = process_tree::register(
             &self.paths.ownership_file,
             pid,
@@ -227,6 +238,11 @@ impl Supervisor {
                 Ok(snapshot)
             }
             Err(error) => {
+                // 先把 sidecar 的 stderr 尾部落盘，再走清理流程——否则子进程被终止后
+                // 现场就再也取不到了（这正是此前无法定位 `runtime_start_failed` 的原因）。
+                if let Some(tail) = stderr_tail.as_ref() {
+                    write_sidecar_stderr_diagnostic(&self.paths.logs, tail);
+                }
                 self.policy.clear_dsh_origin();
                 let deadline = self.effective_cleanup_deadline();
                 let cleanup_result = process_tree::begin_cleanup(&self.paths.ownership_file)
@@ -261,10 +277,7 @@ impl Supervisor {
             .stdout
             .take()
             .ok_or_else(|| AppError::new(ErrorCode::RuntimeStartFailed, "DSH stdout 不可用"))?;
-        if let Some(stderr) = child.stderr.take() {
-            drain_without_logging(stderr);
-        }
-        let receiver = parse_stdout(stdout);
+        let receiver = parse_stdout(stdout, self.paths.logs.clone());
         let auth_deadline = Instant::now() + Duration::from_secs(90);
         let auth = loop {
             if self.shutdown_intent.load(Ordering::SeqCst) {
@@ -273,19 +286,15 @@ impl Supervisor {
                     "启动已被退出请求取消",
                 ));
             }
-            if child
-                .try_wait()
-                .map_err(|error| {
-                    AppError::new(
-                        ErrorCode::RuntimeStartFailed,
-                        format!("无法检查 DSH：{error}"),
-                    )
-                })?
-                .is_some()
-            {
+            if let Some(status) = child.try_wait().map_err(|error| {
+                AppError::new(
+                    ErrorCode::RuntimeStartFailed,
+                    format!("无法检查 DSH：{error}"),
+                )
+            })? {
                 return Err(AppError::new(
                     ErrorCode::RuntimeStartFailed,
-                    "DSH 在提供连接 URL 前退出",
+                    format!("DSH 在提供连接 URL 前退出（{status}）"),
                 ));
             }
             let remaining = auth_deadline.saturating_duration_since(Instant::now());
@@ -690,22 +699,34 @@ fn wait_for_listener(port: u16, shutdown_intent: &AtomicBool) -> Result<(), AppE
 
 fn parse_stdout(
     reader: impl Read + Send + 'static,
+    logs: PathBuf,
 ) -> mpsc::Receiver<Result<handshake::AuthUrl, AppError>> {
     let (sender, receiver) = mpsc::sync_channel(1);
     thread::spawn(move || {
         let mut delivered = false;
+        // 记录 sidecar stdout 的**首行**原文：真机验收时出现过 sidecar 存活但应用始终
+        // 收不到 URL 的情况，而日志里看不到 sidecar 究竟输出了什么。
+        // 首行是 `dsh web: <url>`，其中的 token 在写入前会被抹掉。
+        let mut first_line: Option<String> = None;
         for line in BufReader::new(reader).lines() {
-            match line
+            let outcome = line
                 .map_err(|error| AppError::new(ErrorCode::HandshakeInvalid, error.to_string()))
-                .and_then(|line| handshake::parse(&line))
-            {
+                .and_then(|line| {
+                    if first_line.is_none() && !line.trim().is_empty() {
+                        first_line = Some(line.clone());
+                    }
+                    handshake::parse(&line)
+                });
+            match outcome {
                 Ok(Some(auth)) => {
+                    write_sidecar_stdout_probe(&logs, first_line.as_deref());
                     if !delivered {
                         delivered = sender.send(Ok(auth)).is_ok();
                     }
                 }
                 Ok(None) => {}
                 Err(error) => {
+                    write_sidecar_stdout_probe(&logs, first_line.as_deref());
                     if !delivered {
                         let _ = sender.send(Err(error));
                         return;
@@ -713,19 +734,67 @@ fn parse_stdout(
                 }
             }
         }
+        // 流结束仍未交付 → 把首行留下，供判断"是否根本没打印 URL"
+        if !delivered {
+            write_sidecar_stdout_probe(&logs, first_line.as_deref());
+        }
     });
     receiver
 }
 
-fn drain_without_logging(mut reader: impl Read + Send + 'static) {
+/// 把 sidecar stdout 的首行（脱敏 token 后）写入诊断文件。
+fn write_sidecar_stdout_probe(logs: &Path, first_line: Option<&str>) {
+    let Some(line) = first_line else { return };
+    let redacted = match line.split_once("token=") {
+        Some((prefix, _)) => format!("{prefix}token=[redacted]"),
+        None => line.to_owned(),
+    };
+    if fs::create_dir_all(logs).is_err() {
+        return;
+    }
+    let _ = fs::write(logs.join("sidecar-stdout-first-line.log"), redacted);
+}
+
+/// 持续读取 sidecar 的 stderr，并在内存中只保留**尾部**若干字节。
+///
+/// 保留尾部而非全部：崩溃/报错的真正原因通常在最后几行，而 DSH 在启动阶段会输出较多进度信息。
+/// 读取必须持续进行，否则管道写满会阻塞 sidecar。
+fn capture_stderr_tail(mut reader: impl Read + Send + 'static) -> Arc<Mutex<Vec<u8>>> {
+    const TAIL_LIMIT: usize = 16 * 1024;
+    let tail = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&tail);
     thread::spawn(move || {
         let mut buffer = [0_u8; 4096];
         while let Ok(read) = reader.read(&mut buffer) {
             if read == 0 {
                 break;
             }
+            if let Ok(mut held) = sink.lock() {
+                held.extend_from_slice(&buffer[..read]);
+                if held.len() > TAIL_LIMIT {
+                    let excess = held.len() - TAIL_LIMIT;
+                    held.drain(..excess);
+                }
+            }
         }
     });
+    tail
+}
+
+/// 启动失败时把 sidecar 的 stderr 尾部落盘到独立文件，供人工排查。
+///
+/// 直接落盘而不写入 `app.jsonl`：stderr 内容不可控，且可能包含路径等信息；
+/// 独立文件既便于查看，也避免污染结构化审计日志。
+/// 文件名固定，每次失败覆盖，因此不会无限增长。
+fn write_sidecar_stderr_diagnostic(logs: &Path, tail: &Arc<Mutex<Vec<u8>>>) {
+    let Ok(held) = tail.lock() else { return };
+    if held.is_empty() {
+        return;
+    }
+    if fs::create_dir_all(logs).is_err() {
+        return;
+    }
+    let _ = fs::write(logs.join("sidecar-stderr.log"), &*held);
 }
 
 fn consume_restart_budget(window: &mut Option<Instant>, now: Instant) -> bool {

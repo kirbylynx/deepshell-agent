@@ -120,7 +120,15 @@ fn configure_process_group(command: &mut Command) {
 fn configure_process_group(command: &mut Command) {
     use std::os::windows::process::CommandExt;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
-    command.creation_flags(CREATE_NEW_PROCESS_GROUP);
+    // `CREATE_NO_WINDOW` 是必需的：sidecar 是**控制台程序**（node.exe），
+    // 而本应用是 GUI 子系统（`windows_subsystem = "windows"`、无控制台）。
+    // 仅设 `CREATE_NEW_PROCESS_GROUP` 时，Windows 会为子进程**新建一个可见的控制台窗口**——
+    // 由于 stdout/stderr 已被管道接管，用户看到的就是一个**空白命令行窗口**
+    // （本机 Windows 真机验收实测暴露）。
+    // `CREATE_NO_WINDOW` 让子进程仍拥有自己的控制台（但不显示），
+    // 因此 stdout/stderr 管道与进程组语义**均不受影响**。
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    command.creation_flags(CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW);
 }
 
 #[cfg(test)]
