@@ -7,7 +7,7 @@ const root = resolve(import.meta.dirname, '../..')
 describe('runtime lock', () => {
   it('只包含精确版本与固定安全配置', async () => {
     const lock = JSON.parse(await readFile(resolve(root, 'runtime/manifest/runtime-lock.json'), 'utf8'))
-    expect(lock.applicationVersion).toBe('0.1.2')
+    expect(lock.applicationVersion).toBe('0.1.3')
     expect(lock.node.version).toBe('24.20.0')
     expect(lock.platforms).toEqual(['darwin-arm64', 'win32-x64'])
     expect(lock.node.targets['darwin-arm64'].archiveType).toBe('tar.gz')

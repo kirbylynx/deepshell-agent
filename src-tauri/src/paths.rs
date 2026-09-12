@@ -793,7 +793,7 @@ mod tests {
             metadata["fromApplicationVersion"].as_str(),
             Some(PREVIOUS_APPLICATION_VERSION_FOR_SESSION_BACKUP)
         );
-        assert_eq!(metadata["toApplicationVersion"].as_str(), Some("0.1.2"));
+        assert_eq!(metadata["toApplicationVersion"].as_str(), Some("0.1.3"));
         assert_eq!(
             metadata["fromDshVersion"].as_str(),
             Some(PREVIOUS_DSH_VERSION_FOR_SESSION_BACKUP)

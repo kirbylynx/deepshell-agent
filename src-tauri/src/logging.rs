@@ -97,7 +97,7 @@ mod tests {
         .unwrap();
         let path = temporary.path().join("app.jsonl");
         let text = fs::read_to_string(&path).unwrap();
-        assert!(text.contains("\"appVersion\":\"0.1.2\""));
+        assert!(text.contains("\"appVersion\":\"0.1.3\""));
         assert!(text.contains("\"errorCode\":\"runtime_start_failed\""));
         #[cfg(unix)]
         assert_eq!(
