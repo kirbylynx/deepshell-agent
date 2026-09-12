@@ -20,6 +20,7 @@ export const packageSourceInputs = [
   'runtime/manifest',
   'scripts/lib/runtime.mjs',
   'scripts/lib/source-inputs.mjs',
+  'scripts/lib/package-platform.mjs',
   'scripts/prepare-runtime.mjs',
   'scripts/prepare-profile.mjs',
   'scripts/sign-package.mjs',
