@@ -35,11 +35,14 @@ Capabilities already included in the source baseline:
 
 Still required before formal signed/notarized public binary distribution:
 
-- Windows x64 hardware or CI installer acceptance;
-- Windows WebView2 first-run, shutdown, and process-tree cleanup acceptance;
 - macOS Developer ID signing and Apple notarization;
 - Windows code signing;
-- release-level license/NOTICE inventory review.
+- release-level license/NOTICE inventory review;
+- macOS-side regression acceptance (`v0.1.3` ran acceptance on Windows only, and this machine cannot rebuild macOS artifacts to prove the macOS baseline is intact);
+- the Windows uninstall-cleanup defect fix (Roadmap `REL-024`);
+- per-platform runtime trimming (Roadmap `REL-022`; the current installer carries 187.5 MB of macOS Node runtime that Windows never uses).
+
+Completed by `v0.1.3` (the two items previously listed here): Windows x64 on-device installer acceptance, and Windows WebView2 first-run / shutdown / process-tree cleanup acceptance. See the [v0.1.3 closeout](docs/releases/v0.1.3.md).
 
 ## Main capabilities
 
@@ -95,11 +98,19 @@ Developer-preview DMGs are locally signed for packaging, but they have not compl
 Target platform:
 
 - Windows 10 22H2 or Windows 11 x64;
-- WebView2 Runtime.
+- WebView2 Runtime (the NSIS installer embeds the bootstrapper and installs it automatically when missing).
 
-After a formal Windows release, Windows users should download the NSIS installer and install through the setup wizard.
+Windows users should download the NSIS installer and install through the setup wizard.
 
-The current source baseline has locked Windows x64 runtime assets, but the Windows installer, WebView2 first-run behavior, shutdown, and process-tree cleanup still require validation on Windows hardware or CI.
+**`v0.1.3` completed end-to-end acceptance on real Windows x64 hardware** (setup wizard, first launch, data directory, credential setup, sessions and tools, single instance, dynamic ports, malicious-origin isolation, exit cleanup, crash recovery, diagnostics bundle, environment restoration). Acceptance found and fixed 8 Windows platform defects; see the [v0.1.3 closeout](docs/releases/v0.1.3.md).
+
+**Known limitations recorded honestly for this version** (not to be read as passes):
+
+- **Uninstall does not clean up fully**: if the Sidecar becomes an orphan after an abnormal exit, the install directory retains 5 files / 108.54 MB, which require terminating that process and deleting them manually (not fixed in this version; Roadmap `REL-024`).
+- **Per-platform runtime trimming is not implemented**: the installer bundles both the macOS and Windows Node runtimes, and the macOS half (4800 files / 187.5 MB) is entirely unused on Windows (Roadmap `REL-022`).
+- Two WebView2 matrix dimensions were not measured this round: font/CJK rendering, and the file picker / drag-and-drop / clipboard.
+- Dependency vulnerability audit is unavailable on this machine (the configured npm mirror has no audit endpoint), so **dependencies have not passed a vulnerability scan**.
+- Windows code signing is not done.
 
 ## Usage
 
@@ -307,9 +318,11 @@ pnpm package:mvp
 
 Notes:
 
-- On Windows, `pnpm package:mvp` calls Tauri to build the NSIS installer.
-- Windows installer behavior, WebView2 first run, shutdown, and process-tree cleanup must be accepted on Windows hardware or CI.
+- On Windows, `pnpm package:mvp` calls Tauri to build the NSIS installer, and additionally emits the package manifest (`runtime/staging/package-release.json`, `schemaVersion: 4`) and runs the E2E/Release security-boundary comparison.
+- The NSIS toolchain is **downloaded automatically by Tauri** into `%LOCALAPPDATA%\tauri\NSIS\`; it needs no separate install and no system `PATH` change. The WebView2 bootstrapper is cached in the same directory.
+- `v0.1.3` ran that pipeline end to end on real Windows x64 hardware (compile → makensis → manifest capture → boundary comparison, exit 0); the artifact is 80.41 MB.
 - The current source baseline does not include Windows code signing. Complete signing separately before formal binary distribution.
+- Dependency vulnerability audit requires a working npm audit endpoint. When the configured mirror does not provide one, `pnpm security-audit` **reports the failure honestly** rather than reporting a pass.
 
 ### Common development commands
 

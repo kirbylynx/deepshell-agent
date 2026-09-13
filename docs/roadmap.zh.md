@@ -197,7 +197,7 @@
 | SESSION-019 | Session 导出 | 导出可审计的会话与运行记录 | P2 | 未开始 |
 | SESSION-020 | 多机 Session 同步 | 在设备之间同步和恢复 Session | P3 | 未开始 |
 | SESSION-021 | DSH Session format V3 迁移保护 | 通过有限升级前 Session 备份、不可降级提示和失败安全信息保护 DSH runtime refresh | P0 | 已实现（v0.1.2） |
-| SESSION-022 | 真实旧 Session 升级验收 | 提升到 developer preview 之外前，手工验证代表性的 `v0.1.1` Session 可在 `v0.1.2` 下打开或正确迁移 | P0 | 待实现（v0.1.3） |
+| SESSION-022 | 真实旧 Session 升级验收 | 提升到 developer preview 之外前，手工验证代表性的 `v0.1.1` Session 可在 `v0.1.2` 下打开或正确迁移 | P0 | 未实现：按用户决定跳过（无旧版本数据可供验证） |
 
 ### 4.7 Workspace、文件、Shell 与 Git
 
@@ -234,7 +234,7 @@
 | SAFE-009 | 不可信内容清洗 | 安全渲染 Markdown、网页、文档和 Tool Output | P1 | 未开始 |
 | SAFE-010 | Safety Guard | 对删除、批量覆盖和破坏性 Git 追加控制 | P2 | 未开始 |
 | SAFE-011 | Workspace 外读取控制 | 在需要更强数据边界时增加策略 | P2 | 未开始 |
-| SAFE-012 | 平台 Sandbox 能力矩阵 | 展示 macOS/Windows/Linux 实际保护和降级 | P1 | 待实现（v0.1.3） |
+| SAFE-012 | 平台 Sandbox 能力矩阵 | 展示 macOS/Windows/Linux 实际保护和降级 | P1 | 部分实现（v0.1.3）：Windows 侧 8 项中 5 项实测通过、1 项查明记录、2 项未验证；macOS 未重测、Linux 未验收 |
 | SAFE-013 | MCP 权限与来源展示 | 显示命令、URL、工具、凭据和风险 | P1 | 未开始 |
 | SAFE-014 | Plugin 安全策略 | 限制高权限扩展的来源和加载 | P1 | 未开始 |
 | SAFE-015 | SBOM | 生成软件物料清单 | P1 | 已实现（v0.1.1） |
@@ -324,7 +324,7 @@
 | OPS-009 | 配置与数据迁移 | 幂等升级并验证可读性 | P1 | 已实现（v0.1.0） |
 | OPS-010 | 升级前备份与恢复 | 有限备份、失败停止和恢复说明 | P1 | 已实现（v0.1.2） |
 | OPS-011 | 数据清理 | 明确清除 Session、缓存或全部应用数据 | P2 | 未开始 |
-| OPS-012 | 卸载数据保留策略 | 默认保留并提供显式清理方法 | P2 | 待实现（v0.1.3） |
+| OPS-012 | 卸载数据保留策略 | 默认保留并提供显式清理方法 | P2 | 部分实现（v0.1.3）：「默认保留」实测通过；勾选删除项的实际删除清单未实测；卸载清理不干净为已知缺陷 |
 | OPS-013 | Opt-in 遥测 | 用户主动启用的产品指标 | P3 | 未开始 |
 | OPS-014 | 隐私控制 | 公布字段、目的、保留期和删除方式 | P1 | 未开始 |
 
@@ -345,14 +345,14 @@
 | REL-011 | 原子 Compatibility Set | App、Node、DSH 和 First-party Plugin 同步升级 | P1 | 已实现（v0.1.0） |
 | REL-012 | 数据迁移兼容 | 更新后 Session、Settings 和 Credentials 可读 | P1 | 已实现（v0.1.0） |
 | REL-013 | 安装/升级/卸载验收清单 | 定义可重复的真实产物验收状态和数据保留检查 | P1 | 已实现（v0.1.1） |
-| REL-014 | 跨 WebView 验收 | WKWebView、WebView2 和 WebKitGTK 差异测试 | P1 | 待实现（v0.1.3） |
+| REL-014 | 跨 WebView 验收 | WKWebView、WebView2 和 WebKitGTK 差异测试 | P1 | 部分实现（v0.1.3）：Windows/WebView2 侧 6 个维度中 1 个通过、3 个部分实测、2 个未测；WKWebView 未重测、WebKitGTK 未验收 |
 | REL-015 | Mobile | iOS/Android 客户端或伴侣应用 | P3 | 未开始 |
 | REL-016 | Release staging 自动化 | 准备公开 release 资产、校验和、license inventory、SBOM/report 引用和 release notes 草稿，但不执行发布 | P1 | 已实现（v0.1.1） |
-| REL-017 | Windows x64 installer 验收 | 在真实 Windows 或 CI 中验证实际 NSIS installer、WebView2 首启、Session 创建、退出清理和卸载行为 | P1 | 待实现（v0.1.3） |
+| REL-017 | Windows x64 installer 验收 | 在真实 Windows 或 CI 中验证实际 NSIS installer、WebView2 首启、Session 创建、退出清理和卸载行为 | P1 | 已实现（v0.1.3）：真实 Windows x64 真机端到端验收；卸载环节存在已知缺陷（见 REL-024） |
 | REL-018 | 签名二进制分发 | 面向普通用户发布已签名/已公证的平台安装包 | P1 | 未开始 |
 | REL-019 | DSH runtime refresh to 0.1.5 | 原子升级 pinned DSH runtime、lockfile、profile、First-party Bundle 兼容、release artifacts 和公开文档到上游 DSH 0.1.5 兼容集 | P0 | 已实现（v0.1.2） |
-| REL-020 | Windows x64 构建环境验收 | 在 Windows x64 真机上实测并记录构建主机前置条件：MSVC C++ 工具集与 Windows SDK 完整性、`rc.exe` 可用性、WebView2 Runtime、PowerShell 解析路径、NSIS 工具链获取方式，以及 `pnpm release:windows:check` 的 preflight 结果 | P1 | 待实现（v0.1.3） |
-| REL-021 | Windows x64 产物清单与安全边界验收能力 | 使 Windows 侧能产出等价结构的产物清单并执行安全边界比较，覆盖测试资源与 E2E 标记检查；改造须保留 macOS 侧既有能力 | P1 | 待实现（v0.1.3） |
+| REL-020 | Windows x64 构建环境验收 | 在 Windows x64 真机上实测并记录构建主机前置条件：MSVC C++ 工具集与 Windows SDK 完整性、`rc.exe` 可用性、WebView2 Runtime、PowerShell 解析路径、NSIS 工具链获取方式，以及 `pnpm release:windows:check` 的 preflight 结果 | P1 | 已实现（v0.1.3）：六项前置条件全部实测记录 |
+| REL-021 | Windows x64 产物清单与安全边界验收能力 | 使 Windows 侧能产出等价结构的产物清单并执行安全边界比较，覆盖测试资源与 E2E 标记检查；改造须保留 macOS 侧既有能力 | P1 | 已实现（v0.1.3）：清单产出与安全边界比较均在 Windows 实跑通过 |
 | REL-022 | 按平台裁剪运行时打包 | 各平台安装包只打包**自己实际需要**的 Node 运行时，而不是把每个平台的运行时都塞进每个安装包。`v0.1.3` Windows NSIS 安装包实测：安装后 32226 个文件 / 512 MB，其中 `runtime/node/darwin-arm64` 占 4800 个文件 / 187.5 MB，而 Windows 永不使用它；macOS `.app` 存在对称的 `win32-x64` 浪费。修复需在 `tauri.conf.json` 中按平台条件化 `bundle.resources` 映射，**并同步修改** `verify-package.mjs` 中"同一产物内必须同时存在两平台运行时"的必需项断言。**不得**通过移除官方 DSH 核心运行时能力来达成 | P1 | 未开始 |
 | REL-023 | Windows x64 免安装 ZIP 版 | 在 NSIS 安装包之外**再产出一个 Windows x64 免安装 ZIP**（解压即用、无需安装），面向试用评估、受限机器、以及无法运行安装程序的用户。需先决策并记录：(1) 便携运行的数据存放位置——沿用安装版的 `%APPDATA%\com.deepshell.agent`，还是改为随便携目录走的独立路径（`paths.rs` 目前一切都由 Tauri 的 `app_data_dir()` 推导）；(2) 因没有卸载程序，需明确清理指引；(3) 如何避免写注册表（当前卸载项仅由 NSIS 安装器写入）与创建快捷方式；(4) 是否允许与已安装副本共存而不发生 Session/凭据冲突。必须复用既有的 release-staging 多产物暂存与产物清单检查，**不得**另造一套清单 | P1 | 未开始 |
 | REL-025 | 已隔离的 ownership 记录不得永久阻断启动 | `recover_registered` 必须能够**回收陈旧的隔离记录**，而不是让此后每一次启动都失败。Windows 真机实测（`v0.1.3`）：`runtime-state/ownership.json` 一旦处于 `state:"quarantined"`，应用**每次启动都直接失败**（`runtime_stop_failed`）且无自愈路径——该状态只被**写入**（`quarantine_registered` 与"executable 不匹配"分支），从未被**回收**：`ensure_active` 对 `quarantined` 一律返回 `Err`，而 `recover_registered` 只对 `expected_executable` **匹配**的记录做核验。代码注释宣称的"下次启动重新核验后清理"**从未实现**。`v0.1.3` 已在 Windows 侧修复"登记进程**已死**"这一情形；**macOS 的 `process_tree.rs` 存在同源缺陷，本次刻意未改**——在无 macOS 真机的情况下改动该分支属未验证改动。剩余范围：在真实 macOS 上验证并移植该修复；并决定"登记进程存活但属外来进程"（当前为硬阻断，需人工删除该文件或终止该进程）是否维持硬阻断 | P1 | 部分修复（Windows，v0.1.3）；macOS 未开始 |

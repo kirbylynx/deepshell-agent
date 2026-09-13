@@ -444,9 +444,12 @@ V1 baseline target:
 | Platform | Status |
 |---|---|
 | macOS arm64 | MVP build path available; formal public binary release still requires Developer ID signing and notarization |
-| Windows x64 | Runtime assets and build route locked; installer/WebView2/process-tree behavior requires Windows hardware or CI validation |
+| Windows x64 | **Acceptance completed in `v0.1.3` on real Windows x64 hardware** (installer, first run, data directory, credentials, sessions and tools, single instance, dynamic ports, malicious-origin isolation, exit cleanup, crash recovery, diagnostics bundle). Remaining gaps, recorded honestly: uninstall does not clean up fully when an orphan Sidecar is present (`REL-024`), Windows code signing, and web/code-signing-independent items listed in the `v0.1.3` closeout. |
 | Linux | Deferred |
 | Intel macOS / Windows arm64 | Deferred unless user demand changes priority |
+
+> ⚠️ **`v0.1.3` 未在 macOS 上做运行验收**。本版本的全部结论来自 Windows x64 真机；
+> macOS 侧只完成了静态复核，**不得**据此声明 macOS 基线未被破坏（`AGENTS.md` §7：macOS 通过不等于 Windows 通过，其逆命题同样成立）。
 
 ### 9.3 Package content rules
 
@@ -460,6 +463,14 @@ Release packages must include only the runtime files needed for the target platf
 - credentials or user data.
 
 Package verification must compare E2E and Release artifacts to prove test-only capabilities are absent from Release builds.
+
+> ⚠️ **已知未满足项（`REL-022`，`v0.1.3` 实测记录）**：本条第一款"只包含目标平台所需的运行时文件"
+> **当前实现未满足**。实测：Windows NSIS 安装包同时打包了 `runtime/node/darwin-arm64` 与
+> `runtime/node/win32-x64` 两套 Node 运行时，其中 **macOS 部分 4800 文件 / 187.5 MB 在 Windows 上完全无用**
+> （安装后总占用 32226 文件 / 512.03 MB）。macOS `.app` 侧存在对称的 `win32-x64` 浪费。
+> 根因：`tauri.conf.json` 的 `bundle.resources` 按**整个目录**映射，未按平台条件化；
+> 且 `verify-package.mjs` 的必需产物断言**主动要求**单个产物内同时存在两个平台的 Node，
+> 因此修复必须同时改动该断言。本版本**不实施**，已在 Roadmap 登记。
 
 ### 9.4 Updates and migration
 
