@@ -43,6 +43,15 @@ impl AppError {
         self.code
     }
 
+    /// 诊断文本：包含"哪个步骤、什么原因"，只允许写入本机日志，不得直接展示给用户。
+    ///
+    /// 与 [`Self::user_message`] 的分工是硬边界：面向 UI 的文案固定且不含路径，
+    /// 面向日志的文本才带细节。此前失败日志只记 `user_message()`，导致现场仅剩
+    /// `runtime_stop_failed` 一个代号、根因全部丢失（本机 Windows 验收实测暴露）。
+    pub fn diagnostic_message(&self) -> &str {
+        &self.message
+    }
+
     pub fn user_message(&self) -> &'static str {
         match self.code {
             ErrorCode::HandshakeInvalid => "DSH 认证握手失败，请重启 Runtime",
@@ -76,5 +85,20 @@ mod tests {
 
         assert_eq!(error.user_message(), "DeepShell Runtime 启动失败");
         assert!(!error.user_message().contains("/Users/"));
+    }
+
+    #[test]
+    fn diagnostic_message_keeps_the_root_cause_for_logs() {
+        let error = AppError::new(
+            ErrorCode::RuntimeStopFailed,
+            "Runtime 启动失败（无法读取配置），且启动失败清理未完成（taskkill 超时）",
+        );
+
+        // 面向日志的一侧必须保留根因，且能看出是"启动失败 + 清理失败"双重故障。
+        assert!(error.diagnostic_message().contains("无法读取配置"));
+        assert!(error.diagnostic_message().contains("taskkill 超时"));
+        assert!(error.to_string().starts_with("runtime_stop_failed: "));
+        // 面向用户的文案依旧固定，不随诊断文本变化。
+        assert_eq!(error.user_message(), "DeepShell Runtime 未能安全停止");
     }
 }

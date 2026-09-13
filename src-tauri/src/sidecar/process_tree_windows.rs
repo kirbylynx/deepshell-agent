@@ -105,14 +105,19 @@ pub fn recover_registered(
     ensure_supported(&record)?;
     let expected = fs::canonicalize(expected_executable).map_err(runtime_stop_error)?;
     if record.expected_executable != expected {
-        return quarantine(
-            path,
-            &mut record,
-            AppError::new(
-                ErrorCode::RuntimeStopFailed,
-                "ownership registry 的 Sidecar executable 不属于当前应用；拒绝误杀",
-            ),
-        );
+        // 记录里的 executable 不属于当前应用：**拒绝误杀**，标记隔离。
+        // 但隔离只是"这次不清理"，不能变成"以后永远启动不了"——若登记的 leader 已经
+        // 死了，就没有任何东西需要杀，此时应当回收这条陈旧记录并继续启动。
+        // （真机验收实测：残留的 quarantined 记录让应用每次启动都直接失败，
+        //  且日志只有 `runtime_stop_failed` 一个代号，完全看不出原因。）
+        let _ = quarantine_record(path, &mut record);
+        if !process_alive(record.leader_pid) {
+            return unregister(path);
+        }
+        return Err(AppError::new(
+            ErrorCode::RuntimeStopFailed,
+            "ownership registry 的 Sidecar executable 不属于当前应用，且登记的进程仍存活；拒绝误杀",
+        ));
     }
     verify_executable_if_available(record.leader_pid, &expected)?;
     mark_cleaning(path, &mut record)?;

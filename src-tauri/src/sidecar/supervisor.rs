@@ -105,7 +105,10 @@ impl Supervisor {
         let token_state = failure_token_state(error, startup);
         // 把失败原因的文字说明一并写入日志。此前只记 `errorCode`，导致现场只剩
         // `runtime_start_failed` 一个代号、无法定位（本机 Windows 验收实测暴露）。
-        // 该文本全部由本应用构造，且经 logging 层的最小脱敏，不含凭据。
+        // 之后又发现只记 `user_message()` 同样不够：那是面向 UI 的固定文案，
+        // `failed_start_result` 拼出的"启动失败原因 + 清理失败原因"会整段丢失。
+        // 这里改用 `diagnostic_message()`；logging 层已做 token 脱敏，但不脱敏路径——
+        // 绝对路径的抹除交给 diagnostics 导出侧（`app_state::redact_roots`）。
         let _ = logging::record_detailed(
             &self.paths.logs,
             "error",
@@ -116,7 +119,7 @@ impl Supervisor {
             },
             Some(error.code()),
             None,
-            Some(error.user_message()),
+            Some(error.diagnostic_message()),
         );
         *self
             .snapshot
@@ -837,7 +840,9 @@ fn failed_start_result(
         Ok(()) => Err(startup_error),
         Err(cleanup_error) => Err(AppError::new(
             ErrorCode::RuntimeStopFailed,
-            format!("Runtime 启动失败（{startup_error}），且启动失败清理未完成（{cleanup_error}）"),
+            // 用 `|` 分隔两段故障，且各自带错误码前缀（`AppError` 的 Display 形式）。
+            // 此前是一条中文长句，日志里无法区分"哪段是启动原因、哪段是清理原因"。
+            format!("启动失败：{startup_error} | 清理失败：{cleanup_error}"),
         )),
     }
 }
@@ -922,6 +927,14 @@ mod tests {
 
         assert_eq!(error.code(), ErrorCode::RuntimeStopFailed);
         assert_eq!(failure_phase(&error, true), RuntimePhase::RuntimeFailed);
+        // 两段根因都必须保留，否则日志里又只剩一个代号（回归保护）。
+        let message = error.diagnostic_message();
+        assert!(message.contains("injected handshake failure"), "{message}");
+        assert!(message.contains("injected cleanup failure"), "{message}");
+        assert!(message.contains("handshake_invalid"), "{message}");
+        assert!(message.contains("runtime_stop_failed"), "{message}");
+        // 面向用户的文案不暴露诊断细节。
+        assert_eq!(error.user_message(), "DeepShell Runtime 未能安全停止");
     }
 
     #[test]
