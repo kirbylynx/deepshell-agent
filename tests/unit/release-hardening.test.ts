@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -164,6 +164,62 @@ describe('v0.1.1 release hardening scripts', () => {
         '--sbom', sbom,
         '--package-report', report
       ])).rejects.toThrow()
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('release notes 与 manifest 的 Windows 验收说法必须与请求的版本语义一致', async () => {
+    // 针对 F-001：`release-staging.mjs` 可用任意 `--version` 生成发布资料，若把某个版本的
+    // 验收结论写死在脚本里，就会产出"v0.1.4 的标题 + 声明 v0.1.3 验收"的自相矛盾资料。
+    // 本用例用**未登记验收的合成版本**驱动同一条路径，断言产物中不出现其它版本的说法。
+    const synthetic = '0.1.4-test'
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-version-'))
+    try {
+      const license = resolve(temporary, 'license.json')
+      const sbom = resolve(temporary, 'sbom.json')
+      const report = resolve(temporary, 'package-report.json')
+      const security = resolve(temporary, 'security-audit.json')
+      const windowsInstaller = resolve(temporary, 'source.exe')
+      const output = resolve(temporary, 'release')
+      await writeFile(windowsInstaller, 'windows')
+      for (const path of [license, sbom, report, security]) {
+        await writeFile(path, `{"application":{"version":"${synthetic}"}}\n`)
+      }
+
+      await runNode([
+        'scripts/release-staging.mjs',
+        '--version', synthetic,
+        '--output-dir', output,
+        '--windows-installer', windowsInstaller,
+        '--license-inventory', license,
+        '--sbom', sbom,
+        '--package-report', report,
+        '--security-audit', security
+      ])
+
+      const notes = await readFile(resolve(output, 'RELEASE_NOTES.md'), 'utf8')
+      const manifest = JSON.parse(await readFile(resolve(output, 'release-manifest.json'), 'utf8'))
+
+      // ① notes 与 manifest 的版本必须是请求的版本
+      expect(notes).toContain(`# DeepShell Agent v${synthetic} Developer Preview`)
+      expect(manifest.application.version).toBe(synthetic)
+
+      // ② 合成版本没有任何验收记录 → 必须如实声明缺失，且**不得**出现别的版本号
+      expect(manifest.windowsStatus).toBe('no-acceptance-recorded-for-this-version')
+      expect(manifest.windowsAcceptanceRecord).toBeNull()
+      expect(notes).toContain('no Windows on-device acceptance is recorded for this version')
+      expect(notes).not.toContain('v0.1.3')
+      expect(JSON.stringify(manifest)).not.toContain('v0.1.3')
+
+      // ③ 已登记版本必须给出存在且版本匹配的验收记录路径
+      const { acceptanceFor } = await import('../../scripts/lib/windows-acceptance.mjs')
+      const recorded = acceptanceFor('0.1.3')
+      expect(recorded.recorded).toBe(true)
+      if (recorded.recorded) {
+        expect(recorded.record).toContain('0.1.3')
+        await access(resolve(root, recorded.record))
+      }
     } finally {
       await rm(temporary, { recursive: true, force: true })
     }
