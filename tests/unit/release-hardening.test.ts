@@ -206,22 +206,61 @@ describe('v0.1.1 release hardening scripts', () => {
       expect(manifest.application.version).toBe(synthetic)
 
       // ② 合成版本没有任何验收记录 → 必须如实声明缺失，且**不得**出现别的版本号
-      expect(manifest.windowsStatus).toBe('no-acceptance-recorded-for-this-version')
+      //    针对 F-002：机器可读状态必须是稳定枚举，人类可读措辞另置 summary 字段。
+      expect(manifest.windowsStatusCode).toBe('not-recorded-for-this-version')
+      expect(typeof manifest.windowsStatusSummary).toBe('string')
       expect(manifest.windowsAcceptanceRecord).toBeNull()
       expect(notes).toContain('no Windows on-device acceptance is recorded for this version')
       expect(notes).not.toContain('v0.1.3')
       expect(JSON.stringify(manifest)).not.toContain('v0.1.3')
 
       // ③ 已登记版本必须给出存在且版本匹配的验收记录路径
-      const { acceptanceFor } = await import('../../scripts/lib/windows-acceptance.mjs')
+      const { acceptanceFor, WindowsStatusCode, windowsStatusCodes, windowsManifestFields } =
+        await import('../../scripts/lib/windows-acceptance.mjs')
       const recorded = acceptanceFor('0.1.3')
       expect(recorded.recorded).toBe(true)
       if (recorded.recorded) {
         expect(recorded.record).toContain('0.1.3')
         await access(resolve(root, recorded.record))
       }
+
+      // ④ 针对 F-002：状态码必须是**已知枚举**，不得退化为自由文本。
+      //    任何新状态都必须先加入 WindowsStatusCode，从而强制一次有意识的契约变更。
+      const accepted = windowsManifestFields('0.1.3')
+      expect(windowsStatusCodes).toContain(accepted.windowsStatusCode)
+      expect(accepted.windowsStatusCode).toBe(WindowsStatusCode.AcceptedOnDevice)
+      expect(windowsStatusCodes).toContain(manifest.windowsStatusCode)
+      // 状态码本身不含空格等自然语言特征，避免机器契约再次被文案污染
+      expect(accepted.windowsStatusCode).not.toMatch(/\s/)
     } finally {
       await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('验收记录没有遗留缺陷时必须输出专门文案，而不是空列表占位', async () => {
+    // 针对 F-003：缺陷列表为空时，原实现用 `map().join(', ')` 渲染，会产出
+    // `… Known unfixed defects ship with this version: .` —— 冒号后直接跟句点。
+    // 本用例注入一个"已验收且无遗留缺陷"的版本，断言走专门文案。
+    const { windowsAcceptance, windowsNotesLine } =
+      await import('../../scripts/lib/windows-acceptance.mjs')
+    const injected = '9.9.9-test'
+    expect(windowsAcceptance[injected]).toBeUndefined()
+    windowsAcceptance[injected] = {
+      record: 'docs/releases/v9.9.9.md',
+      scope: 'all scenarios passed; no deferred defects',
+      unfixed: []
+    }
+    try {
+      const line = windowsNotesLine(injected)
+      expect(line).toContain('none for this version')
+      expect(line).not.toMatch(/:\s*\./) // 不得出现 ": ."
+      expect(line).not.toMatch(/version:\s*\./)
+      // 有遗留缺陷时仍须逐个列出，避免"修空列表"把正常路径也改坏
+      const withDefects = windowsNotesLine('0.1.3')
+      expect(withDefects).toContain('REL-022')
+      expect(withDefects).toContain('DESK-023')
+    } finally {
+      delete windowsAcceptance[injected]
     }
   })
 

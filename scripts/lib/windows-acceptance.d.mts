@@ -5,7 +5,6 @@ export interface WindowsAcceptanceUnfixedDefect {
 
 export interface RecordedWindowsAcceptance {
   recorded: true
-  status: string
   record: string
   scope: string
   unfixed: WindowsAcceptanceUnfixedDefect[]
@@ -13,11 +12,16 @@ export interface RecordedWindowsAcceptance {
 
 export interface UnrecordedWindowsAcceptance {
   recorded: false
-  status: string
 }
 
+export const WindowsStatusCode: {
+  readonly AcceptedOnDevice: 'accepted-on-device'
+  readonly NotRecorded: 'not-recorded-for-this-version'
+}
+
+export const windowsStatusCodes: readonly string[]
+
 export const windowsAcceptance: Record<string, {
-  status: string
   record: string
   scope: string
   unfixed: WindowsAcceptanceUnfixedDefect[]
@@ -30,7 +34,8 @@ export function acceptanceFor(
 export function windowsNotesLine(version: string): string
 
 export function windowsManifestFields(version: string): {
-  windowsStatus: string
+  windowsStatusCode: string
+  windowsStatusSummary: string
   windowsAcceptanceRecord: string | null
   windowsAcceptanceScope: string | null
 }
