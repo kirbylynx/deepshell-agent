@@ -78,12 +78,12 @@
 | DESK-004 | Bundled Node.js | 最终用户无须安装 Node/npm/pnpm | P0 | 已实现（v0.1.0） |
 | DESK-005 | Full Pinned DSH | 随应用分发精确锁定的官方 DSH npm 版本 | P0 | 已实现（v0.1.0） |
 | DESK-006 | Sidecar 启动握手 | 管理 PID、动态端口、nonce、ready 与启动超时 | P0 | 已实现（v0.1.0） |
-| DESK-007 | Sidecar 健康检查 | 区分 starting、ready、degraded 和 crashed | P0 | 已实现（v0.1.0） |
+| DESK-007 | Sidecar 健康检查 | 区分 starting、ready 和 crashed（⚠️ 原描述含 degraded，但 0.1.3 读码确认 RuntimePhase 仅有 Starting/Ready/Recovering/StartupFailed/RuntimeFailed —— **degraded 在实现中不存在**） | P0 | 已实现（v0.1.0） |
 | DESK-008 | Sidecar 优雅退出 | 落盘后退出，并在超时后清理进程树 | P0 | 已实现（v0.1.0） |
 | DESK-009 | Sidecar 崩溃恢复 | 有限自动重启、interrupted 状态和手动恢复入口 | P0 | 已实现（v0.1.0） |
 | DESK-010 | 独立 DSH_HOME | 不污染或复用用户已有 DSH CLI 环境 | P0 | 已实现（v0.1.0） |
 | DESK-011 | 动态回环端口 | 仅绑定 loopback，避免固定端口冲突 | P0 | 已实现（v0.1.0） |
-| DESK-012 | 基础菜单 | About、Quit 和版本信息 | P0 | 已实现（v0.1.0） |
+| DESK-012 | 基础菜单 | About、Quit 和版本信息 | P0 | 部分实现（macOS 符合 HIG；**Windows 不可用见 DESK-023**） |
 | DESK-013 | 外部链接处理 | 在系统浏览器打开非本地链接 | P0 | 已实现（v0.1.0） |
 | DESK-014 | Tray | 托盘状态与常用操作 | P2 | 未开始 |
 | DESK-015 | Native Menu 与快捷键 | 提供完整桌面菜单和全局/应用快捷键 | P2 | 未开始 |
@@ -94,6 +94,7 @@
 | DESK-020 | Reveal in Folder | 从应用定位到系统文件管理器 | P2 | 未开始 |
 | DESK-021 | 原生 File/Directory Picker | 在官方 Picker 不足时提供最小 Tauri 桥接 | P2 | 未开始 |
 | DESK-022 | 多窗口 | 支持独立 Session、设置或辅助窗口 | P3 | 未开始 |
+| DESK-023 | 按平台差异化顶部菜单 | **Windows 与 macOS 需要各自合适的顶部菜单**，而不是共用一套 macOS 风格的应用程序菜单。`v0.1.3` Windows 真机实测暴露两个问题：① **菜单文本与窗口标题重复**——窗口标题为 `DeepShell Agent`（`lib.rs` L129），菜单名**也是同一个字符串**（`lib.rs` L87），Windows 上标题栏下方紧接着又是一个 `DeepShell Agent`，用户难以区分哪个是标题、哪个是菜单；② **菜单内容不符合 Windows 惯例**——当前菜单项为 `about / separator / services / separator / hide / hide_others / separator / quit`（`lib.rs` L85-99），这一整套是 **macOS 的"应用程序菜单"规范**（`services`/`hide`/`hide_others` 在 Windows 上无对应概念），而这些项在 **macOS 上之所以合理，是因为菜单位于屏幕顶部菜单栏（不在窗口内），且 Apple HIG 本就要求应用菜单以应用名命名**——同一套配置放到 Windows 就表现为"窗口里重复出现应用名 + 一堆无效菜单项"。**根因**：菜单构建代码**完全没有平台分支**（全量搜索 `src-tauri/src/**.rs` 的 `#[cfg(target_os)]`/`#[cfg(windows)]`，**没有一处针对菜单**）。修复范围：按平台分别构建菜单——macOS 保留应用菜单（应用名 + about/services/hide/quit）；Windows 改为本地惯例的窗口菜单栏（如 `文件`/`编辑`/`视图`/`帮助`，About 与版本信息归入"帮助"），并确保菜单名**不与窗口标题重复** | P2 | 未开始 |
 
 ### 4.2 官方 Web UI 与产品界面
 

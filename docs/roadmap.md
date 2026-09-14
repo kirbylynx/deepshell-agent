@@ -78,12 +78,12 @@ The Status column records current implementation facts and confirmed active-vers
 | DESK-004 | Bundled Node.js | End users do not need Node/npm/pnpm | P0 | Implemented (v0.1.0) |
 | DESK-005 | Full pinned DSH | Distribute an exact pinned official DSH npm version with the app | P0 | Implemented (v0.1.0) |
 | DESK-006 | Sidecar startup handshake | Manage PID, dynamic port, nonce, ready, and startup timeout | P0 | Implemented (v0.1.0) |
-| DESK-007 | Sidecar health check | Distinguish starting, ready, degraded, and crashed | P0 | Implemented (v0.1.0) |
+| DESK-007 | Sidecar health check | Distinguish starting, ready, and crashed (the original description included degraded, but 0.1.3 code reading confirms RuntimePhase has only Starting/Ready/Recovering/StartupFailed/RuntimeFailed - **degraded does not exist in the implementation**) | P0 | Implemented (v0.1.0) |
 | DESK-008 | Graceful Sidecar shutdown | Exit after persistence, then clean up the process tree after timeout | P0 | Implemented (v0.1.0) |
 | DESK-009 | Sidecar crash recovery | Limited automatic restart, interrupted state, and manual recovery entry | P0 | Implemented (v0.1.0) |
 | DESK-010 | Independent DSH_HOME | Do not pollute or reuse the user's existing DSH CLI environment | P0 | Implemented (v0.1.0) |
 | DESK-011 | Dynamic loopback port | Bind only to loopback and avoid fixed-port conflicts | P0 | Implemented (v0.1.0) |
-| DESK-012 | Basic menu | About, Quit, and version information | P0 | Implemented (v0.1.0) |
+| DESK-012 | Basic menu | About, Quit, and version information | P0 | Partially implemented (HIG-compliant on macOS; **unusable on Windows, see DESK-023**) |
 | DESK-013 | External link handling | Open non-local links in the system browser | P0 | Implemented (v0.1.0) |
 | DESK-014 | Tray | Tray status and common actions | P2 | Not started |
 | DESK-015 | Native menu and shortcuts | Complete desktop menu and global/app shortcuts | P2 | Not started |
@@ -94,6 +94,7 @@ The Status column records current implementation facts and confirmed active-vers
 | DESK-020 | Reveal in Folder | Locate files in the system file manager from the app | P2 | Not started |
 | DESK-021 | Native File/Directory Picker | Provide minimal Tauri bridging only when official pickers are insufficient | P2 | Not started |
 | DESK-022 | Multi-window | Support independent Session, settings, or auxiliary windows | P3 | Not started |
+| DESK-023 | Per-platform top menu | **Windows and macOS each need an appropriate top menu** instead of sharing one macOS-style application menu. `v0.1.3` real-Windows acceptance exposed two problems: (1) **the menu text duplicates the window title** - the window title is `DeepShell Agent` (`lib.rs` L129) and the menu name is **the very same string** (`lib.rs` L87), so on Windows a second `DeepShell Agent` sits directly under the title bar and the user cannot tell which is the title and which is the menu; (2) **the menu content does not follow Windows convention** - the current items are `about / separator / services / separator / hide / hide_others / separator / quit` (`lib.rs` L85-99), which is the **macOS "application menu" convention** (`services`/`hide`/`hide_others` have no Windows counterpart). Those items are reasonable on macOS **because the menu lives in the screen-top menu bar (not inside the window) and Apple HIG requires the application menu to be named after the app** - the same configuration on Windows shows up as "the app name repeated inside the window plus a set of meaningless items". **Root cause**: the menu-building code has **no platform branching at all** (a full search of `#[cfg(target_os)]`/`#[cfg(windows)]` across `src-tauri/src/**.rs` finds **not one occurrence for the menu**). Scope: build the menu per platform - macOS keeps the application menu (app name plus about/services/hide/quit); Windows gets a conventional window menu bar (such as `File`/`Edit`/`View`/`Help`, with About and version information under Help), and the menu name **must not duplicate the window title** | P2 | Not started |
 
 ### 4.2 Official Web UI and product interface
 
