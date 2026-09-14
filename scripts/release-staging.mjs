@@ -136,7 +136,7 @@ const notes = [
   '- macOS arm64: developer preview packaging lane.',
   '- Code signing: ad-hoc/local signing only.',
   '- Apple notarization: not performed.',
-  '- Windows x64: route/checklist prepared; installer pass requires real Windows or CI validation.',
+  '- Windows x64: accepted end-to-end on real Windows 11 hardware for v0.1.3 (see docs/releases/v0.1.3.md). Known unfixed defects ship with this version: REL-022 (per-platform runtime trimming), REL-024 (uninstall residue when an orphan Sidecar is present), REL-026 (drag-and-drop), REL-027 (dead client renderer), DESK-023 (Windows menu).',
   '',
   '## Assets',
   '',
@@ -150,7 +150,12 @@ await writeFile(resolve(outputDirectory, 'release-manifest.json'), redactedJson(
   generatedAt: new Date().toISOString(),
   assets,
   publishPolicy: 'local staging only; GitHub release creation and asset upload require explicit user authorization',
-  windowsStatus: 'pending-real-windows-or-ci-validation'
+  // v0.1.3 已在真实 Windows 11 真机上完成端到端验收（见 docs/releases/v0.1.3.md）。
+  // 此前该字段硬编码为 'pending-real-windows-or-ci-validation'，验收通过后已与事实不符，
+  // 而该清单是随发布产出的用户可见元数据，故据实更新。
+  windowsStatus: 'accepted-on-real-windows-hardware',
+  windowsAcceptanceRecord: 'docs/releases/v0.1.3.md',
+  windowsAcceptanceScope: 'S1-S13 end-to-end; S11 (uninstall) partially passed; 8 platform defects fixed; 4 new defects deferred (REL-024..REL-027)'
 }))
 
 console.log(`release staging written: ${outputDirectory}`)
