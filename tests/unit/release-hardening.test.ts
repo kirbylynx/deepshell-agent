@@ -130,7 +130,13 @@ describe('v0.1.1 release hardening scripts', () => {
       expect(sums).toContain('deepshell-agent-v0.1.1-test-security-audit.json')
       expect(sums).not.toContain(temporary)
       expect(manifest.publishPolicy).toContain('explicit user authorization')
-      expect(notes).toContain('Windows x64: route/checklist prepared')
+      // 断言 notes 的**结构**而非具体措辞：此前这里写死了当时的 Windows 状态文案
+      // （'Windows x64: route/checklist prepared'），导致 `release-staging.mjs` 更新该文案后
+      // 测试立即断裂——而那次改动本身是正确的（v0.1.3 已完成真机验收）。
+      // 产品文案会随验收进展变化，测试应当锁定"notes 必须存在状态章节、且必须交代 Windows x64 情况"
+      // 这一不变式，而不是锁定某一句话。
+      expect(notes).toContain('## Distribution status')
+      expect(notes).toContain('Windows x64:')
     } finally {
       await rm(temporary, { recursive: true, force: true })
     }
