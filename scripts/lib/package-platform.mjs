@@ -17,6 +17,7 @@
 import { accessSync, constants, readdirSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { currentRuntimePlatform, root } from './runtime.mjs'
+import { selectWindowsNsisInstallerName } from './artifact-selection.mjs'
 
 const MACOS_APP = 'src-tauri/target/release/bundle/macos/DeepShell Agent.app'
 // ⚠️ 实测①（P6）：cargo 的二进制名取自 **crate 名**（`deepshell-agent`），**不是** `productName`。
@@ -81,14 +82,16 @@ function windowsIntermediateRoot() {
 // 「安装包尚未产出」，而不是给出误导性的单文件错误）。
 function windowsArtifactPath() {
   const directory = resolve(root, WINDOWS_NSIS_DIRECTORY)
+  let names
   try {
-    const installers = readdirSync(directory)
-      .filter(name => name.toLowerCase().endsWith('-setup.exe'))
-      .sort()
-    if (installers.length === 1) return resolve(directory, installers[0])
+    names = readdirSync(directory)
   } catch {
     // 目录不存在 → 尚未构建，退回目录路径由调用方报告
+    return directory
   }
+  const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
+  const installer = selectWindowsNsisInstallerName(names, pkg.version)
+  if (installer !== null) return resolve(directory, installer)
   return directory
 }
 

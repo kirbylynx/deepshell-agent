@@ -448,8 +448,7 @@ V1 baseline target:
 | Linux | Deferred |
 | Intel macOS / Windows arm64 | Deferred unless user demand changes priority |
 
-> ⚠️ **`v0.1.3` 未在 macOS 上做运行验收**。本版本的全部结论来自 Windows x64 真机；
-> macOS 侧只完成了静态复核，**不得**据此声明 macOS 基线未被破坏（`AGENTS.md` §7：macOS 通过不等于 Windows 通过，其逆命题同样成立）。
+> ⚠️ **`v0.1.3` did not run acceptance on macOS**; its runtime conclusions came from real Windows x64 hardware. The active `v0.1.4` branch has since rebuilt and verified the macOS packaging path, but the final cross-platform artifact set still requires platform-specific acceptance. A pass on either platform must not be treated as a pass on the other (`AGENTS.md` §7).
 
 ### 9.3 Package content rules
 
@@ -464,13 +463,9 @@ Release packages must include only the runtime files needed for the target platf
 
 Package verification must compare E2E and Release artifacts to prove test-only capabilities are absent from Release builds.
 
-> ⚠️ **已知未满足项（`REL-022`，`v0.1.3` 实测记录）**：本条第一款"只包含目标平台所需的运行时文件"
-> **当前实现未满足**。实测：Windows NSIS 安装包同时打包了 `runtime/node/darwin-arm64` 与
-> `runtime/node/win32-x64` 两套 Node 运行时，其中 **macOS 部分 4800 文件 / 187.5 MB 在 Windows 上完全无用**
-> （安装后总占用 32226 文件 / 512.03 MB）。macOS `.app` 侧存在对称的 `win32-x64` 浪费。
-> 根因：`tauri.conf.json` 的 `bundle.resources` 按**整个目录**映射，未按平台条件化；
-> 且 `verify-package.mjs` 的必需产物断言**主动要求**单个产物内同时存在两个平台的 Node，
-> 因此修复必须同时改动该断言。本版本**不实施**，已在 Roadmap 登记。
+> ⚠️ **Known `v0.1.3` gap (`REL-022`)**: that released baseline does not satisfy the first rule above. Its Windows NSIS package contains both `runtime/node/darwin-arm64` and `runtime/node/win32-x64`; the **4,800-file / 187.5 MB macOS runtime is entirely unused on Windows** (the installed tree totals 32,226 files / 512.03 MB). The macOS `.app` has the symmetric `win32-x64` waste.
+>
+> The active `v0.1.4` branch has implemented and rebuilt the macOS path with platform-specific Tauri configuration and verification rules; its macOS `.app` contains only `darwin-arm64` Node. Windows packaging and on-device verification are still pending, so `REL-022` remains `Planned (v0.1.4)` and the cross-platform feature must not be described as complete.
 
 ### 9.4 Updates and migration
 

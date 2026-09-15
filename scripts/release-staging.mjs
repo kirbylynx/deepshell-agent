@@ -4,6 +4,13 @@ import { basename, extname, resolve } from 'node:path'
 import { root } from './lib/runtime.mjs'
 import { redactedJson } from './lib/redaction.mjs'
 import { windowsManifestFields, windowsNotesLine } from './lib/windows-acceptance.mjs'
+import {
+  assertArtifactNameMatchesVersion,
+  isMacosDmgName,
+  isWindowsNsisInstallerName,
+  selectMacosDmgName,
+  selectWindowsNsisInstallerName,
+} from './lib/artifact-selection.mjs'
 
 function argValue(name, fallback) {
   const prefix = `${name}=`
@@ -27,18 +34,31 @@ async function sha256(path) {
   return createHash('sha256').update(bytes).digest('hex')
 }
 
-async function newestByExtension(directory, extension) {
-  if (!await exists(directory)) return null
-  const files = (await readdir(directory)).filter(file => extname(file).toLowerCase() === extension).sort()
-  return files.length === 0 ? null : resolve(directory, files.at(-1))
+async function matchingAsset(directory, version, selector, extension, candidatePredicate = () => true) {
+  if (!await exists(directory)) return { status: 'missing' }
+  const files = (await readdir(directory))
+    .filter(file => extname(file).toLowerCase() === extension && candidatePredicate(file))
+    .sort()
+  const selected = selector(files, version)
+  if (selected !== null) return { status: 'present', path: resolve(directory, selected) }
+  if (files.length === 0) return { status: 'missing' }
+  throw new Error(`未找到当前版本 ${version} 的合法发布资产；候选文件：${files.join(', ')}`)
 }
 
-async function newestDmg() {
-  return newestByExtension(resolve(root, 'src-tauri/target/release/bundle/dmg'), '.dmg')
+async function currentDmg(version) {
+  const directory = resolve(argValue('--dmg-dir', resolve(root, 'src-tauri/target/release/bundle/dmg')))
+  return matchingAsset(directory, version, selectMacosDmgName, '.dmg')
 }
 
-async function newestWindowsInstaller() {
-  return newestByExtension(resolve(root, 'src-tauri/target/release/bundle/nsis'), '.exe')
+async function currentWindowsInstaller(version) {
+  const directory = resolve(argValue('--windows-installer-dir', resolve(root, 'src-tauri/target/release/bundle/nsis')))
+  return matchingAsset(
+    directory,
+    version,
+    selectWindowsNsisInstallerName,
+    '.exe',
+    file => file.toLowerCase().endsWith('-setup.exe'),
+  )
 }
 
 async function copyJsonIfPresent(source, target, assets, label, version) {
@@ -61,37 +81,25 @@ await mkdir(outputDirectory, { recursive: true })
 
 const assets = []
 const dmgArg = argValue('--dmg', undefined)
-const explicitDmg = dmgArg !== undefined
-const dmg = dmgArg === undefined ? await newestDmg() : resolve(dmgArg)
+const dmg = dmgArg === undefined ? await currentDmg(version) : { status: 'present', path: resolve(dmgArg) }
 const windowsInstallerArg = argValue('--windows-installer', undefined)
-const explicitWindowsInstaller = windowsInstallerArg !== undefined
-const windowsInstaller = windowsInstallerArg === undefined ? await newestWindowsInstaller() : resolve(windowsInstallerArg)
-if (dmg === null) {
+const windowsInstaller = windowsInstallerArg === undefined
+  ? await currentWindowsInstaller(version)
+  : { status: 'present', path: resolve(windowsInstallerArg) }
+if (dmg.status === 'missing') {
   assets.push({ label: 'macos-dmg', status: 'missing', asset: `DeepShell.Agent_${version}_aarch64.dmg` })
-} else if (!explicitDmg && !basename(dmg).includes(version)) {
-  assets.push({
-    label: 'macos-dmg',
-    status: 'stale-version',
-    asset: basename(dmg),
-    expectedVersion: version
-  })
 } else {
+  assertArtifactNameMatchesVersion(basename(dmg.path), version, 'macOS DMG', isMacosDmgName)
   const target = resolve(outputDirectory, `DeepShell.Agent_${version}_aarch64.dmg`)
-  await copyFile(dmg, target)
+  await copyFile(dmg.path, target)
   assets.push({ label: 'macos-dmg', status: 'present', asset: basename(target), sha256: await sha256(target) })
 }
-if (windowsInstaller === null) {
+if (windowsInstaller.status === 'missing') {
   assets.push({ label: 'windows-nsis', status: 'missing', asset: `DeepShell.Agent_${version}_x64-setup.exe` })
-} else if (!explicitWindowsInstaller && !basename(windowsInstaller).includes(version)) {
-  assets.push({
-    label: 'windows-nsis',
-    status: 'stale-version',
-    asset: basename(windowsInstaller),
-    expectedVersion: version
-  })
 } else {
+  assertArtifactNameMatchesVersion(basename(windowsInstaller.path), version, 'Windows installer', isWindowsNsisInstallerName)
   const target = resolve(outputDirectory, `DeepShell.Agent_${version}_x64-setup.exe`)
-  await copyFile(windowsInstaller, target)
+  await copyFile(windowsInstaller.path, target)
   assets.push({ label: 'windows-nsis', status: 'present', asset: basename(target), sha256: await sha256(target) })
 }
 await copyJsonIfPresent(

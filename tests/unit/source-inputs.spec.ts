@@ -14,6 +14,7 @@ import {
 
 const execFileAsync = promisify(execFile)
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
+const EXPECTED_V013_COMMIT = '34142a3e78f237b0c494551ffe4a8e309f3ab66a'
 
 describe('构建输入指纹', () => {
   it('任意被纳入的生命周期源码变化都会使旧指纹失效', async () => {
@@ -63,10 +64,79 @@ describe('构建输入指纹', () => {
     expect(platformSourceInputs['win32-x64']).toContain('src-tauri/tauri.windows.conf.json')
     expect(platformSourceInputs['darwin-arm64']).toContain('scripts/lib/package-manifest.mjs')
     expect(platformSourceInputs['win32-x64']).toContain('scripts/lib/package-manifest.mjs')
+    for (const declaration of [
+      'scripts/lib/artifact-selection.d.mts',
+      'scripts/lib/package-manifest.d.mts',
+      'scripts/lib/package-platform.d.mts',
+      'scripts/lib/package-size.d.mts',
+      'scripts/lib/process-plan.d.mts',
+      'scripts/lib/source-inputs.d.mts',
+      'scripts/lib/tree-manifest.d.mts',
+      'scripts/lib/windows-acceptance.d.mts',
+    ]) {
+      expect(platformSourceInputs['darwin-arm64']).toContain(declaration)
+      expect(platformSourceInputs['win32-x64']).toContain(declaration)
+    }
+    expect(platformSourceInputs['darwin-arm64']).toContain('scripts/run-e2e.mjs')
+    expect(platformSourceInputs['darwin-arm64']).toContain('wdio.conf.ts')
+    expect(platformSourceInputs['win32-x64']).not.toContain('scripts/run-e2e.mjs')
+    expect(platformSourceInputs['win32-x64']).not.toContain('wdio.conf.ts')
+    expect(platformSourceInputs['darwin-arm64']).toContain('scripts/lib/windows-acceptance.mjs')
+    expect(platformSourceInputs['win32-x64']).toContain('scripts/lib/windows-acceptance.mjs')
+  })
+
+  it('平台专属输入的 digest 变化只影响对应平台输入集', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-platform-inputs-'))
+    try {
+      await writeFile(resolve(temporary, 'shared.txt'), 'shared\n')
+      await writeFile(resolve(temporary, 'mac.txt'), 'mac-before\n')
+      await writeFile(resolve(temporary, 'win.txt'), 'win-before\n')
+      const macInputs = ['shared.txt', 'mac.txt']
+      const winInputs = ['shared.txt', 'win.txt']
+      const macBefore = await deterministicInputDigest(temporary, macInputs)
+      const winBefore = await deterministicInputDigest(temporary, winInputs)
+
+      await writeFile(resolve(temporary, 'mac.txt'), 'mac-after\n')
+      const macAfter = await deterministicInputDigest(temporary, macInputs)
+      const winAfterMacChange = await deterministicInputDigest(temporary, winInputs)
+      await writeFile(resolve(temporary, 'win.txt'), 'win-after\n')
+      const winAfter = await deterministicInputDigest(temporary, winInputs)
+
+      expect(macAfter).not.toBe(macBefore)
+      expect(winAfterMacChange).toBe(winBefore)
+      expect(winAfter).not.toBe(winBefore)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('共享声明文件变化会同时影响两平台 digest', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-declaration-inputs-'))
+    try {
+      await writeFile(resolve(temporary, 'shared.d.mts'), 'export const value: string\n')
+      await writeFile(resolve(temporary, 'mac-only.ts'), 'export const platform = "mac"\n')
+      await writeFile(resolve(temporary, 'win-only.ts'), 'export const platform = "win"\n')
+      const macInputs = ['shared.d.mts', 'mac-only.ts']
+      const winInputs = ['shared.d.mts', 'win-only.ts']
+      const macBefore = await deterministicInputDigest(temporary, macInputs)
+      const winBefore = await deterministicInputDigest(temporary, winInputs)
+
+      await writeFile(resolve(temporary, 'shared.d.mts'), 'export const value: number\n')
+      const macAfter = await deterministicInputDigest(temporary, macInputs)
+      const winAfter = await deterministicInputDigest(temporary, winInputs)
+
+      expect(macAfter).not.toBe(macBefore)
+      expect(winAfter).not.toBe(winBefore)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
   })
 
   it('冻结的 v0.1.3 Git blob 输入可重算并匹配 tracked fixture', async () => {
     const fixture = JSON.parse(await readFile(resolve(workspace, 'tests/fixtures/package-size-baselines/v0.1.3.json'), 'utf8'))
+    const { stdout: liveCommit } = await execFileAsync('git', ['rev-parse', 'v0.1.3^{commit}'], { cwd: workspace })
+    expect(liveCommit.trim()).toBe(EXPECTED_V013_COMMIT)
+    expect(fixture.canonicalSource.peeledCommit).toBe(EXPECTED_V013_COMMIT)
     const digest = await gitRevisionInputDigest(workspace, 'v0.1.3^{commit}', v013BaselineSourceInputs)
     expect(digest).toBe(fixture.canonicalSource.baselineSourceInputSha256)
   }, 15_000)

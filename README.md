@@ -12,7 +12,7 @@ DeepShell Agent does not reimplement the Agent Runtime and does not fork the off
 
 ## Current status
 
-The current source baseline is `v0.1.2`, a DSH runtime-refresh update on top of the `v0.1.1` release-hardening baseline. It upgrades the pinned DeepSeek Harness runtime to `0.1.5-rc.1`, keeps the official Web UI / public extension-point architecture unchanged, adds a bounded pre-upgrade backup guard for DSH Session data, and is distributed as a macOS arm64 developer-preview release.
+The latest released baseline is `v0.1.3`, which completed Windows x64 on-device acceptance. The active `v0.1.4` development branch is implementing per-platform package trimming, a Windows portable ZIP, safer Windows uninstall cleanup, and platform-specific menu presentation. It retains the pinned DeepSeek Harness `0.1.5-rc.1` runtime and the official Web UI / public extension-point architecture. Windows results for `v0.1.4` remain pending until they are built and verified on Windows hardware.
 
 Capabilities already included in the source baseline:
 
@@ -38,9 +38,9 @@ Still required before formal signed/notarized public binary distribution:
 - macOS Developer ID signing and Apple notarization;
 - Windows code signing;
 - release-level license/NOTICE inventory review;
-- macOS-side regression acceptance (`v0.1.3` ran acceptance on Windows only, and this machine cannot rebuild macOS artifacts to prove the macOS baseline is intact);
+- final macOS regression acceptance for the completed `v0.1.4` cross-platform artifact set;
 - the Windows uninstall-cleanup defect fix (Roadmap `REL-024`);
-- per-platform runtime trimming (Roadmap `REL-022`; the current installer carries 187.5 MB of macOS Node runtime that Windows never uses).
+- completion and real-device verification of the Windows half of per-platform runtime trimming (Roadmap `REL-022`). The active `v0.1.4` branch has implemented and rebuilt the macOS path; Windows packaging is not yet verified on Windows hardware.
 
 Completed by `v0.1.3` (the two items previously listed here): Windows x64 on-device installer acceptance, and Windows WebView2 first-run / shutdown / process-tree cleanup acceptance. See the [v0.1.3 closeout](docs/releases/v0.1.3.md).
 
@@ -104,10 +104,10 @@ Windows users should download the NSIS installer and install through the setup w
 
 **`v0.1.3` completed end-to-end acceptance on real Windows x64 hardware** (setup wizard, first launch, data directory, credential setup, sessions and tools, single instance, dynamic ports, malicious-origin isolation, exit cleanup, crash recovery, diagnostics bundle, environment restoration). Acceptance found and fixed 8 Windows platform defects; see the [v0.1.3 closeout](docs/releases/v0.1.3.md).
 
-**Known limitations recorded honestly for this version** (not to be read as passes):
+**Known limitations of the released `v0.1.3` baseline** (not to be read as current-branch passes):
 
 - **Uninstall does not clean up fully**: if the Sidecar becomes an orphan after an abnormal exit, the install directory retains 5 files / 108.54 MB, which require terminating that process and deleting them manually (not fixed in this version; Roadmap `REL-024`).
-- **Per-platform runtime trimming is not implemented**: the installer bundles both the macOS and Windows Node runtimes, and the macOS half (4800 files / 187.5 MB) is entirely unused on Windows (Roadmap `REL-022`).
+- **Per-platform runtime trimming was not implemented in `v0.1.3`**: its installer bundles both the macOS and Windows Node runtimes, and the macOS half (4800 files / 187.5 MB) is entirely unused on Windows. The active `v0.1.4` branch has implemented and rebuilt the macOS path; Windows packaging and on-device verification remain pending (Roadmap `REL-022`).
 - Two WebView2 matrix dimensions were not measured this round: font/CJK rendering, and the file picker / drag-and-drop / clipboard.
 - Dependency vulnerability audit is unavailable on this machine (the configured npm mirror has no audit endpoint), so **dependencies have not passed a vulnerability scan**.
 - Windows code signing is not done.
@@ -318,7 +318,7 @@ pnpm package:mvp
 
 Notes:
 
-- On Windows, `pnpm package:mvp` calls Tauri to build the NSIS installer, and additionally emits the package manifest (`runtime/staging/package-release.json`, `schemaVersion: 4`) and runs the E2E/Release security-boundary comparison.
+- On Windows, `pnpm package:mvp` calls Tauri to build the NSIS installer, and additionally emits the package manifest (`runtime/staging/package-release.json`, `schemaVersion: 5`) and runs the E2E/Release security-boundary comparison.
 - The NSIS toolchain is **downloaded automatically by Tauri** into `%LOCALAPPDATA%\tauri\NSIS\`; it needs no separate install and no system `PATH` change. The WebView2 bootstrapper is cached in the same directory.
 - `v0.1.3` ran that pipeline end to end on real Windows x64 hardware (compile → makensis → manifest capture → boundary comparison, exit 0); the artifact is 80.41 MB.
 - The current source baseline does not include Windows code signing. Complete signing separately before formal binary distribution.

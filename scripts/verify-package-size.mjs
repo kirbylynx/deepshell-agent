@@ -1,11 +1,16 @@
 import { createHash } from 'node:crypto'
+import { execFile } from 'node:child_process'
 import { readFile, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { promisify } from 'node:util'
 import { root } from './lib/runtime.mjs'
 import { verifyReducedFile, verifyReducedTree } from './lib/package-size.mjs'
 import { platformInputDigest } from './lib/source-inputs.mjs'
 import { normalizedTreeManifest } from './lib/tree-manifest.mjs'
 import { validatePackageManifestV5 } from './lib/package-manifest.mjs'
+
+const execFileAsync = promisify(execFile)
+const EXPECTED_V013_COMMIT = '34142a3e78f237b0c494551ffe4a8e309f3ab66a'
 
 async function readJson(path) {
   return JSON.parse(await readFile(path, 'utf8'))
@@ -21,7 +26,11 @@ function inspection(manifest, subject, inspectionMode) {
 }
 
 const baseline = await readJson(resolve(root, 'tests/fixtures/package-size-baselines/v0.1.3.json'))
-if (baseline.canonicalSource?.peeledCommit !== '34142a3e78f237b0c494551ffe4a8e309f3ab66a') {
+const { stdout: liveV013Commit } = await execFileAsync('git', ['rev-parse', 'v0.1.3^{commit}'], { cwd: root })
+if (liveV013Commit.trim() !== EXPECTED_V013_COMMIT) {
+  throw new Error(`v0.1.3 tag commit 不正确：expected ${EXPECTED_V013_COMMIT}, got ${liveV013Commit.trim()}`)
+}
+if (baseline.canonicalSource?.peeledCommit !== EXPECTED_V013_COMMIT) {
   throw new Error('v0.1.3 baseline peeled commit 不正确')
 }
 

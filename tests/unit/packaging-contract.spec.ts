@@ -1,13 +1,33 @@
-import { readFile } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { packageAdapter } from '../../scripts/lib/package-platform.mjs'
 import { summarizeInspections, validatePackageManifestV5 } from '../../scripts/lib/package-manifest.mjs'
-import { uniqueMatchingArtifact } from '../../scripts/lib/artifact-selection.mjs'
+import { platformInputDigest } from '../../scripts/lib/source-inputs.mjs'
+import { normalizedTreeManifest } from '../../scripts/lib/tree-manifest.mjs'
+import {
+  assertArtifactNameMatchesVersion,
+  isMacosDmgName,
+  isWindowsNsisInstallerName,
+  selectWindowsNsisInstallerName,
+  uniqueMatchingArtifact,
+} from '../../scripts/lib/artifact-selection.mjs'
 import { packageCommandPlan } from '../../scripts/lib/process-plan.mjs'
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
+const execFileAsync = promisify(execFile)
+
+async function runPackageReport(args: string[]) {
+  return execFileAsync(process.execPath, ['scripts/collect-package-report.mjs', ...args], {
+    cwd: workspace,
+    maxBuffer: 32 * 1024 * 1024,
+  })
+}
 
 function merge(left: Record<string, unknown>, right: Record<string, unknown>): Record<string, unknown> {
   const output = { ...left }
@@ -114,6 +134,39 @@ describe('v0.1.4 打包契约', () => {
     )).toThrow('存在多个候选')
   })
 
+  it('Windows installer 只接受当前版本 token，拒绝旧版本和相近版本', () => {
+    const names = [
+      'DeepShell Agent_0.1.3_x64-setup.exe',
+      'DeepShell Agent_0.1.40_x64-setup.exe',
+      'DeepShell Agent_0.1.4_x64-setup.exe',
+      'DeepShell.Agent_0.1.4_x64-setup.exe',
+      'Other_0.1.4_x64-setup.exe',
+      'DeepShell Agent_0.1.4_arm64-setup.exe',
+    ]
+    expect(() => selectWindowsNsisInstallerName(names, '0.1.4')).toThrow('存在多个候选')
+    expect(selectWindowsNsisInstallerName([names[2]], '0.1.4')).toBe('DeepShell Agent_0.1.4_x64-setup.exe')
+    expect(selectWindowsNsisInstallerName([names[3]], '0.1.4')).toBe('DeepShell.Agent_0.1.4_x64-setup.exe')
+    expect(isWindowsNsisInstallerName('DeepShell Agent_0.1.40_x64-setup.exe', '0.1.4')).toBe(false)
+    expect(isWindowsNsisInstallerName('DeepShell Agent_0.1.3_x64-setup.exe', '0.1.4')).toBe(false)
+    expect(isWindowsNsisInstallerName('Other_0.1.4_x64-setup.exe', '0.1.4')).toBe(false)
+    expect(isWindowsNsisInstallerName('DeepShell Agent_0.1.4_arm64-setup.exe', '0.1.4')).toBe(false)
+    expect(selectWindowsNsisInstallerName(names.slice(0, 2), '0.1.4')).toBeNull()
+    expect(() => assertArtifactNameMatchesVersion(
+      'DeepShell Agent_0.1.40_x64-setup.exe',
+      '0.1.4',
+      'Windows installer',
+      isWindowsNsisInstallerName,
+    )).toThrow('版本不一致')
+  })
+
+  it('macOS DMG 也使用严格版本 token，避免 0.1.4 命中 0.1.40', () => {
+    expect(isMacosDmgName('DeepShell Agent_0.1.4_aarch64.dmg', '0.1.4')).toBe(true)
+    expect(isMacosDmgName('DeepShell.Agent_0.1.4_aarch64.dmg', '0.1.4')).toBe(true)
+    expect(isMacosDmgName('DeepShell Agent_0.1.40_aarch64.dmg', '0.1.4')).toBe(false)
+    expect(isMacosDmgName('Other_0.1.4_aarch64.dmg', '0.1.4')).toBe(false)
+    expect(isMacosDmgName('DeepShell Agent_0.1.4_x64.dmg', '0.1.4')).toBe(false)
+  })
+
   it('Windows 通过 cmd.exe 安全启动 pnpm.cmd 且不启用 shell', () => {
     expect(packageCommandPlan('pnpm.cmd', ['exec', 'tauri'], 'win32')).toEqual({
       command: 'cmd.exe', args: ['/d', '/s', '/c', 'pnpm.cmd', 'exec', 'tauri'],
@@ -128,5 +181,238 @@ describe('v0.1.4 打包契约', () => {
     }])
     expect(JSON.stringify(summaries)).not.toContain('/Users/private')
     expect(JSON.stringify(summaries)).toContain('package.dmg')
+  })
+
+  it('package report 从 schema 5 manifest 派生实际打包 runtime 与 delta', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-report-manifest-'))
+    try {
+      const output = resolve(temporary, 'release')
+      await mkdir(output, { recursive: true })
+      const baseline = JSON.parse(await readFile(resolve(workspace, 'tests/fixtures/package-size-baselines/v0.1.3.json'), 'utf8'))
+      const app = resolve(temporary, 'DeepShell Agent.app')
+      await mkdir(resolve(app, 'runtime/node/darwin-arm64/bin'), { recursive: true })
+      await writeFile(resolve(app, 'runtime/node/darwin-arm64/bin/node'), 'node')
+      const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
+      await writeFile(dmg, 'dmg')
+      const dmgBytes = await readFile(dmg)
+      const dmgSha256 = createHash('sha256').update(dmgBytes).digest('hex')
+      const appTree = await normalizedTreeManifest(app)
+      const sourceDigest = await platformInputDigest(workspace, 'darwin-arm64')
+      const manifest = {
+        schemaVersion: 5,
+        platform: 'darwin-arm64',
+        mode: 'release',
+        applicationVersion: '0.1.4',
+        artifactKind: 'macos-app',
+        macosSourceInputSha256: sourceDigest,
+        binarySourceInputSha256: sourceDigest,
+        inspections: [
+          {
+            subject: 'runtime-node',
+            inspectionMode: 'exact-artifact-tree',
+            status: 'equivalent',
+            resources: [{ path: 'runtime/node/darwin-arm64/bin/node', bytes: 1, sha256: 'a'.repeat(64) }],
+            runtimePlatforms: ['darwin-arm64'],
+            size: { bytes: 196611786, files: 4800 },
+            contentSha256: 'b'.repeat(64),
+          },
+          {
+            subject: 'runtime-dsh',
+            inspectionMode: 'exact-artifact-tree',
+            status: 'equivalent',
+            resources: [{ path: 'runtime/dsh/index.js', bytes: 1, sha256: 'a'.repeat(64) }],
+            runtimePlatforms: [],
+            size: { bytes: 220981087, files: 25399 },
+            contentSha256: 'c'.repeat(64),
+          },
+          {
+            subject: 'profile-template',
+            inspectionMode: 'exact-artifact-tree',
+            status: 'equivalent',
+            resources: [{ path: 'runtime/profile-template/template-manifest.json', bytes: 1, sha256: 'a'.repeat(64) }],
+            runtimePlatforms: [],
+            size: { bytes: 67274, files: 17 },
+            contentSha256: 'd'.repeat(64),
+          },
+          {
+            subject: 'macos-app',
+            inspectionMode: 'exact-artifact-tree',
+            status: 'present',
+            resources: [{ path: 'runtime/node/darwin-arm64/bin/node', bytes: 4, sha256: 'a'.repeat(64) }],
+            runtimePlatforms: ['darwin-arm64'],
+            size: { bytes: appTree.bytes, files: appTree.files },
+            contentSha256: appTree.contentSha256,
+          },
+        ],
+        baseline: {
+          status: 'canonical',
+          canonicalSourceRef: 'v0.1.3',
+          canonicalSourceCommit: baseline.canonicalSource.peeledCommit,
+          baselineSourceInputSha256: baseline.canonicalSource.baselineSourceInputSha256,
+          algorithmVersion: baseline.measurement.algorithm,
+          treeContentSha256: baseline.artifacts.macosApp.contentSha256,
+        },
+      }
+      const dmgManifest = {
+        ...manifest,
+        artifactKind: 'macos-dmg',
+        baseline: {
+          status: 'canonical',
+          canonicalSourceRef: 'v0.1.3',
+          canonicalSourceCommit: baseline.canonicalSource.peeledCommit,
+          baselineSourceInputSha256: baseline.canonicalSource.baselineSourceInputSha256,
+          algorithmVersion: baseline.measurement.algorithm,
+          artifactSha256: baseline.artifacts.macosDmg.sha256,
+        },
+        inspections: [
+          {
+            subject: 'macos-dmg',
+            inspectionMode: 'file-metadata-only',
+            status: 'present',
+            resources: [{ path: 'DeepShell Agent_0.1.4_aarch64.dmg', bytes: dmgBytes.length, sha256: dmgSha256 }],
+            runtimePlatforms: [],
+            size: { bytes: dmgBytes.length, files: 1 },
+            sha256: dmgSha256,
+          },
+          {
+            subject: 'dmg-contained-app',
+            inspectionMode: 'archive-extracted-tree',
+            status: 'equivalent',
+            resources: [{ path: 'runtime/node/darwin-arm64/bin/node', bytes: 4, sha256: 'a'.repeat(64) }],
+            runtimePlatforms: ['darwin-arm64'],
+            size: { bytes: appTree.bytes, files: appTree.files },
+            contentSha256: appTree.contentSha256,
+          },
+        ],
+      }
+      await writeFile(resolve(temporary, 'manifest.json'), JSON.stringify(manifest))
+      await writeFile(resolve(temporary, 'dmg-manifest.json'), JSON.stringify(dmgManifest))
+      await writeFile(resolve(temporary, 'license.json'), '{"application":{"version":"0.1.4"}}\n')
+
+      await runPackageReport([
+        '--version', '0.1.4',
+        '--output-dir', output,
+        '--app', app,
+        '--dmg', dmg,
+        '--package-manifest', resolve(temporary, 'manifest.json'),
+        '--dmg-manifest', resolve(temporary, 'dmg-manifest.json'),
+        '--license-inventory', resolve(temporary, 'license.json'),
+      ])
+
+      const report = JSON.parse(await readFile(resolve(output, 'package-report.json'), 'utf8'))
+      expect(report.assets.runtimeNode.bytes).toBe(196611786)
+      expect(report.assets.runtimeNode.files).toBe(4800)
+      expect(report.assets.runtimeNode.baselineVersion).toBe('0.1.3')
+      expect(report.assets.runtimeNode.deltaBytes).toBe(0)
+      expect(report.assets.runtimeNode.runtimePlatforms).toEqual(['darwin-arm64'])
+      expect(report.assets.app.deltaBytes).toBe(appTree.bytes - 545566355)
+      expect(report.foreignRuntimePaths).toEqual([])
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('release package report 默认拒绝缺失、错 kind、过期 baseline 和异平台 runtime', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-report-strict-'))
+    try {
+      await expect(runPackageReport([
+        '--version', '0.1.4',
+        '--output-dir', resolve(temporary, 'missing'),
+        '--package-manifest', 'none',
+        '--dmg-manifest', 'none',
+      ])).rejects.toThrow(/manifest/)
+
+      const baseline = JSON.parse(await readFile(resolve(workspace, 'tests/fixtures/package-size-baselines/v0.1.3.json'), 'utf8'))
+      const sourceDigest = await platformInputDigest(workspace, 'darwin-arm64')
+      const app = resolve(temporary, 'DeepShell Agent.app')
+      await mkdir(resolve(app, 'runtime/node/darwin-arm64/bin'), { recursive: true })
+      await writeFile(resolve(app, 'runtime/node/darwin-arm64/bin/node'), 'node')
+      const appTree = await normalizedTreeManifest(app)
+      const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
+      await writeFile(dmg, 'dmg')
+      const dmgBytes = await readFile(dmg)
+      const dmgSha256 = createHash('sha256').update(dmgBytes).digest('hex')
+      const dmgManifest = {
+        schemaVersion: 5,
+        platform: 'darwin-arm64',
+        mode: 'release',
+        applicationVersion: '0.1.4',
+        artifactKind: 'macos-dmg',
+        macosSourceInputSha256: sourceDigest,
+        binarySourceInputSha256: sourceDigest,
+        inspections: [{
+          subject: 'macos-dmg',
+          inspectionMode: 'file-metadata-only',
+          status: 'present',
+          resources: [{ path: 'DeepShell Agent_0.1.4_aarch64.dmg', bytes: dmgBytes.length, sha256: dmgSha256 }],
+          runtimePlatforms: [],
+          size: { bytes: dmgBytes.length, files: 1 },
+          sha256: dmgSha256,
+        }],
+        baseline: {
+          status: 'canonical',
+          canonicalSourceRef: 'v0.1.3',
+          canonicalSourceCommit: baseline.canonicalSource.peeledCommit,
+          baselineSourceInputSha256: baseline.canonicalSource.baselineSourceInputSha256,
+          algorithmVersion: baseline.measurement.algorithm,
+          artifactSha256: baseline.artifacts.macosDmg.sha256,
+        },
+      }
+      const dmgManifestPath = resolve(temporary, 'dmg-manifest.json')
+      await writeFile(dmgManifestPath, JSON.stringify(dmgManifest))
+      const baseManifest = {
+        schemaVersion: 5,
+        platform: 'darwin-arm64',
+        mode: 'release',
+        applicationVersion: '0.1.4',
+        artifactKind: 'macos-app',
+        macosSourceInputSha256: sourceDigest,
+        binarySourceInputSha256: sourceDigest,
+        inspections: [{
+          subject: 'macos-app',
+          inspectionMode: 'exact-artifact-tree',
+          status: 'present',
+          resources: [{ path: 'runtime/node/darwin-arm64/bin/node', bytes: 1, sha256: 'a'.repeat(64) }],
+          runtimePlatforms: ['darwin-arm64'],
+          size: { bytes: appTree.bytes, files: appTree.files },
+          contentSha256: appTree.contentSha256,
+        }],
+        baseline: {
+          status: 'canonical',
+          canonicalSourceRef: 'v0.1.3',
+          canonicalSourceCommit: baseline.canonicalSource.peeledCommit,
+          baselineSourceInputSha256: baseline.canonicalSource.baselineSourceInputSha256,
+          algorithmVersion: baseline.measurement.algorithm,
+          treeContentSha256: baseline.artifacts.macosApp.contentSha256,
+        },
+      }
+      const wrongKind = { ...baseManifest, artifactKind: 'macos-dmg' }
+      const staleBaseline = {
+        ...baseManifest,
+        baseline: { ...baseManifest.baseline, treeContentSha256: '0'.repeat(64) },
+      }
+      const foreignRuntime = {
+        ...baseManifest,
+        inspections: [{
+          ...baseManifest.inspections[0],
+          resources: [{ path: 'runtime/node/win32-x64/node.exe', bytes: 1, sha256: 'a'.repeat(64) }],
+          runtimePlatforms: ['win32-x64'],
+        }],
+      }
+      for (const [name, manifest] of Object.entries({ wrongKind, staleBaseline, foreignRuntime })) {
+        const path = resolve(temporary, `${name}.json`)
+        await writeFile(path, JSON.stringify(manifest))
+        await expect(runPackageReport([
+          '--version', '0.1.4',
+          '--output-dir', resolve(temporary, name),
+          '--app', app,
+          '--dmg', dmg,
+          '--package-manifest', path,
+          '--dmg-manifest', dmgManifestPath,
+        ])).rejects.toThrow()
+      }
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
   })
 })

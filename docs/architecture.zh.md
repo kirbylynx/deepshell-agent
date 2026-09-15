@@ -450,11 +450,11 @@ V1 优先采用“平台 Node Runtime + 预构建的生产 DSH 资源树”，�
 
 如果 POC 证明标准 Node 资源树无法满足签名、体积或更新要求，才评估 SEA/pkg 等单文件方式；任何替换都必须重新验证 DSH Plugin 和 native module。
 
-> ⚠️ **已知未满足项（`REL-022`，`v0.1.3` Windows 真机实测记录）**：包内容规则要求"发布包只包含目标平台所需的运行时文件"（英文版 §9.3 Package content rules），**当前实现未满足**。
+> ⚠️ **`v0.1.3` 已知未满足项（`REL-022`）**：该已发布基线不满足“发布包只包含目标平台所需的运行时文件”（英文版 §9.3 Package content rules）。
 >
 > 实测：Windows NSIS 安装包**同时打包两套 Node 运行时**——`runtime/node/darwin-arm64` 与 `runtime/node/win32-x64`，其中 **macOS 部分 4800 文件 / 187.5 MB 在 Windows 上完全无用**（安装后总占用 32226 文件 / 512.03 MB）。macOS `.app` 侧存在对称的 `win32-x64` 浪费。
 >
-> 根因：`tauri.conf.json` 的 `bundle.resources` 按**整个目录**映射，未按平台条件化；且 `verify-package.mjs` 的必需产物断言**主动要求**单个产物内同时存在两个平台的 Node，因此修复必须同时改动该断言。本版本**不实施**，已在 Roadmap 登记为 `REL-022`。
+> 当前 `v0.1.4` 开发分支已通过平台专用 Tauri 配置与验证规则实现并重建验证 macOS 路线，macOS `.app` 只包含 `darwin-arm64` Node；Windows 路线的打包和真机验证尚未完成，因此 `REL-022` 仍保持 `Planned (v0.1.4)`，不得据此宣称跨平台功能已完成。
 
 ### 9.3 原子更新与迁移
 

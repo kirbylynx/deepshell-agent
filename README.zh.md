@@ -12,7 +12,7 @@ DeepShell Agent 不重新实现 Agent Runtime，也不 fork 官方 DSH Web UI。
 
 ## 当前状态
 
-当前源码基线版本为 `v0.1.2`，是在 `v0.1.1` 发布硬化基线上的 DSH runtime refresh（运行时刷新）版本。它将固定的 DeepSeek Harness runtime 升级到 `0.1.5-rc.1`，保持官方 Web UI / 官方扩展点架构不变，为 DSH Session 数据增加有限的升级前备份保护，并以 macOS arm64 developer-preview release 形式分发。
+最新已发布基线为 `v0.1.3`，已完成 Windows x64 真机验收。当前 `v0.1.4` 开发分支正在实现按平台裁剪安装包、Windows portable ZIP、更安全的 Windows 卸载清理，以及平台差异化菜单显示；继续固定使用 DeepSeek Harness `0.1.5-rc.1`，并保持官方 Web UI / 官方扩展点架构不变。`v0.1.4` 的 Windows 结果须在 Windows 真机完成构建和验证后才能确认。
 
 已经纳入源码基线的能力：
 
@@ -38,9 +38,9 @@ DeepShell Agent 不重新实现 Agent Runtime，也不 fork 官方 DSH Web UI。
 - macOS Developer ID 签名和 Apple notarization；
 - Windows code signing；
 - release 级许可证/NOTICE 清单复核；
-- macOS 侧回归验收（`v0.1.3` 只在 Windows 上做了运行验收，**本机无法重建 macOS 产物来实证 macOS 基线未破坏**）；
+- 完整 `v0.1.4` 跨平台产物集合的最终 macOS 回归验收；
 - Windows 卸载清理缺陷修复（Roadmap `REL-024`）；
-- 按平台裁剪运行时（Roadmap `REL-022`，当前安装包含 187.5 MB Windows 用不到的 macOS Node 运行时）。
+- 完成并在真机验证按平台裁剪运行时的 Windows 路线（Roadmap `REL-022`）。当前 `v0.1.4` 开发分支已实现并重建验证 macOS 路线，Windows 打包尚未在 Windows 真机验证。
 
 `v0.1.3` 已完成（原列于此处的两项）：Windows x64 真机安装包端到端验收、Windows WebView2 首次启动/退出/进程树清理验收，详见 [v0.1.3 收口文档](docs/releases/v0.1.3.zh.md)。
 
@@ -104,10 +104,10 @@ Windows 用户下载 NSIS installer 并按安装向导安装。
 
 **`v0.1.3` 已在真实 Windows x64 真机上完成端到端验收**（安装向导、首次启动、数据目录、凭据配置、会话与工具、单实例、动态端口、恶意源隔离、退出清理、崩溃恢复、诊断包、环境还原）。验收过程中发现并修复了 8 处 Windows 平台缺陷，详见 [v0.1.3 收口文档](docs/releases/v0.1.3.zh.md)。
 
-**以下为本版本如实记录的已知限制**（不作为"已通过"）：
+**以下为已发布 `v0.1.3` 基线如实记录的已知限制**（不作为当前开发分支的“已通过”）：
 
 - **卸载不干净**：若 Sidecar 因异常退出成为孤儿进程，卸载后安装目录会残留 5 个文件 / 108.54 MB，需人工终止该进程后删除（本版本不修复，见 Roadmap `REL-024`）；
-- **按平台裁剪运行时尚未实现**：安装包同时包含 macOS 与 Windows 两套 Node 运行时，其中 macOS 部分（4800 文件 / 187.5 MB）在 Windows 上完全无用（见 Roadmap `REL-022`）；
+- **`v0.1.3` 尚未按平台裁剪运行时**：其安装包同时包含 macOS 与 Windows 两套 Node 运行时，其中 macOS 部分（4800 文件 / 187.5 MB）在 Windows 上完全无用。当前 `v0.1.4` 开发分支已实现并重建验证 macOS 路线，Windows 打包和真机验证仍待完成（见 Roadmap `REL-022`）；
 - WebView2 差异矩阵中"字体与中文渲染""文件选择/拖放/剪贴板"两个维度本轮未测；
 - 依赖漏洞审计在本机不可用（所配置的 npm 镜像无 audit 端点），**因此未通过漏洞扫描**；
 - Windows code signing 未完成。
@@ -318,7 +318,7 @@ pnpm package:mvp
 
 说明：
 
-- Windows 上的 `pnpm package:mvp` 会调用 Tauri 构建 NSIS installer，并顺带产出产物清单（`runtime/staging/package-release.json`，`schemaVersion: 4`）与执行 E2E/Release 安全边界比较。
+- Windows 上的 `pnpm package:mvp` 会调用 Tauri 构建 NSIS installer，并顺带产出产物清单（`runtime/staging/package-release.json`，`schemaVersion: 5`）与执行 E2E/Release 安全边界比较。
 - NSIS 工具链**由 Tauri 自动下载**到 `%LOCALAPPDATA%\tauri\NSIS\`，无需单独安装，也无需配置系统 `PATH`；同目录还会缓存 WebView2 引导程序。
 - `v0.1.3` 已在真实 Windows x64 真机上完成该流水线的端到端实跑（编译 → makensis → 清单捕获 → 边界比较，exit 0），产物 80.41 MB。
 - 当前源码基线不包含 Windows code signing；正式二进制分发前需要单独完成。

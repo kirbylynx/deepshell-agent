@@ -60,17 +60,17 @@ describe('v0.1.1 release hardening scripts', () => {
       await writeFile(resolve(node, 'node.txt'), 'node')
       await writeFile(resolve(dsh, 'dsh.txt'), 'dsh')
       await writeFile(resolve(profile, 'profile.txt'), 'profile')
-      const dmg = resolve(temporary, 'fixture.dmg')
-      const windowsInstaller = resolve(temporary, 'fixture.exe')
+      const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
+      const windowsInstaller = resolve(temporary, 'DeepShell Agent_0.1.4_x64-setup.exe')
       const license = resolve(temporary, 'license-inventory.json')
       await writeFile(dmg, 'dmg')
       await writeFile(windowsInstaller, 'windows')
-      await writeFile(license, '{"application":{"version":"0.1.1-test"}}\n')
+      await writeFile(license, '{"application":{"version":"0.1.4"}}\n')
       const output = resolve(temporary, 'release')
 
       await runNode([
         'scripts/collect-package-report.mjs',
-        '--version', '0.1.1-test',
+        '--version', '0.1.4',
         '--output-dir', output,
         '--app', app,
         '--dmg', dmg,
@@ -80,14 +80,15 @@ describe('v0.1.1 release hardening scripts', () => {
         '--profile-template', profile,
         '--license-inventory', license,
         '--package-manifest', 'none',
-        '--dmg-manifest', 'none'
+        '--dmg-manifest', 'none',
+        '--allow-missing-release-manifests'
       ])
 
       const reportText = await readFile(resolve(output, 'package-report.json'), 'utf8')
       const report = JSON.parse(reportText)
       expect(report.assets.app.status).toBe('present')
-      expect(report.assets.dmg.asset).toBe('fixture.dmg')
-      expect(report.assets.windowsInstaller.asset).toBe('fixture.exe')
+      expect(report.assets.dmg.asset).toBe('DeepShell Agent_0.1.4_aarch64.dmg')
+      expect(report.assets.windowsInstaller.asset).toBe('DeepShell Agent_0.1.4_x64-setup.exe')
       expect(reportText).not.toContain(temporary)
       expect(reportText).not.toContain(root)
     } finally {
@@ -98,23 +99,23 @@ describe('v0.1.1 release hardening scripts', () => {
   it('生成 release staging 资产、SHA256SUMS 和本地 release notes 草稿', async () => {
     const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-'))
     try {
-      const dmg = resolve(temporary, 'source.dmg')
+      const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
       const license = resolve(temporary, 'license.json')
       const sbom = resolve(temporary, 'sbom.json')
       const report = resolve(temporary, 'package-report.json')
       const security = resolve(temporary, 'security-audit.json')
-      const windowsInstaller = resolve(temporary, 'source.exe')
+      const windowsInstaller = resolve(temporary, 'DeepShell Agent_0.1.4_x64-setup.exe')
       const output = resolve(temporary, 'release')
       await writeFile(dmg, 'dmg')
       await writeFile(windowsInstaller, 'windows')
-      await writeFile(license, '{"application":{"version":"0.1.1-test"}}\n')
-      await writeFile(sbom, '{"application":{"version":"0.1.1-test"}}\n')
-      await writeFile(report, '{"application":{"version":"0.1.1-test"}}\n')
-      await writeFile(security, '{"application":{"version":"0.1.1-test"}}\n')
+      await writeFile(license, '{"application":{"version":"0.1.4"}}\n')
+      await writeFile(sbom, '{"application":{"version":"0.1.4"}}\n')
+      await writeFile(report, '{"application":{"version":"0.1.4"}}\n')
+      await writeFile(security, '{"application":{"version":"0.1.4"}}\n')
 
       await runNode([
         'scripts/release-staging.mjs',
-        '--version', '0.1.1-test',
+        '--version', '0.1.4',
         '--output-dir', output,
         '--dmg', dmg,
         '--windows-installer', windowsInstaller,
@@ -127,9 +128,9 @@ describe('v0.1.1 release hardening scripts', () => {
       const sums = await readFile(resolve(output, 'SHA256SUMS.txt'), 'utf8')
       const manifest = JSON.parse(await readFile(resolve(output, 'release-manifest.json'), 'utf8'))
       const notes = await readFile(resolve(output, 'RELEASE_NOTES.md'), 'utf8')
-      expect(sums).toContain('DeepShell.Agent_0.1.1-test_aarch64.dmg')
-      expect(sums).toContain('DeepShell.Agent_0.1.1-test_x64-setup.exe')
-      expect(sums).toContain('deepshell-agent-v0.1.1-test-security-audit.json')
+      expect(sums).toContain('DeepShell.Agent_0.1.4_aarch64.dmg')
+      expect(sums).toContain('DeepShell.Agent_0.1.4_x64-setup.exe')
+      expect(sums).toContain('deepshell-agent-v0.1.4-security-audit.json')
       expect(sums).not.toContain(temporary)
       expect(manifest.publishPolicy).toContain('explicit user authorization')
       // 断言 notes 的**结构**而非具体措辞：此前这里写死了当时的 Windows 状态文案
@@ -147,19 +148,19 @@ describe('v0.1.1 release hardening scripts', () => {
   it('release staging 拒绝版本不一致的支持资产', async () => {
     const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-mismatch-'))
     try {
-      const dmg = resolve(temporary, 'source.dmg')
+      const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
       const license = resolve(temporary, 'license.json')
       const sbom = resolve(temporary, 'sbom.json')
       const report = resolve(temporary, 'package-report.json')
       const output = resolve(temporary, 'release')
       await writeFile(dmg, 'dmg')
       await writeFile(license, '{"application":{"version":"0.1.0"}}\n')
-      await writeFile(sbom, '{"application":{"version":"0.1.1-test"}}\n')
-      await writeFile(report, '{"application":{"version":"0.1.1-test"}}\n')
+      await writeFile(sbom, '{"application":{"version":"0.1.4"}}\n')
+      await writeFile(report, '{"application":{"version":"0.1.4"}}\n')
 
       await expect(runNode([
         'scripts/release-staging.mjs',
-        '--version', '0.1.1-test',
+        '--version', '0.1.4',
         '--output-dir', output,
         '--dmg', dmg,
         '--license-inventory', license,
@@ -171,19 +172,67 @@ describe('v0.1.1 release hardening scripts', () => {
     }
   })
 
+  it('release staging 拒绝显式传入旧版本或相近版本 installer', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-installer-version-'))
+    try {
+      const output = resolve(temporary, 'release')
+      const wrongInstaller = resolve(temporary, 'DeepShell Agent_0.1.40_x64-setup.exe')
+      await writeFile(wrongInstaller, 'windows')
+
+      await expect(runNode([
+        'scripts/release-staging.mjs',
+        '--version', '0.1.4',
+        '--output-dir', output,
+        '--windows-installer', wrongInstaller,
+      ])).rejects.toThrow(/版本不一致/)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('release staging 自动发现时拒绝 old-only、错误产品名和错误架构资产', async () => {
+    const cases = [
+      ['old-only', 'DeepShell Agent_0.1.3_x64-setup.exe'],
+      ['wrong-product', 'Other_0.1.4_x64-setup.exe'],
+      ['wrong-arch', 'DeepShell Agent_0.1.4_arm64-setup.exe'],
+    ] as const
+    for (const [name, installerName] of cases) {
+      const temporary = await mkdtemp(resolve(tmpdir(), `deepshell-stage-${name}-`))
+      try {
+        const dmgDirectory = resolve(temporary, 'dmg')
+        const installerDirectory = resolve(temporary, 'nsis')
+        await mkdir(dmgDirectory)
+        await mkdir(installerDirectory)
+        await writeFile(resolve(installerDirectory, installerName), 'windows')
+
+        await expect(runNode([
+          'scripts/release-staging.mjs',
+          '--version', '0.1.4',
+          '--output-dir', resolve(temporary, 'release'),
+          '--dmg-dir', dmgDirectory,
+          '--windows-installer-dir', installerDirectory,
+        ])).rejects.toThrow(/未找到当前版本 0\.1\.4 的合法发布资产/)
+      } finally {
+        await rm(temporary, { recursive: true, force: true })
+      }
+    }
+  })
+
   it('release notes 与 manifest 的 Windows 验收说法必须与请求的版本语义一致', async () => {
     // 针对 F-001：`release-staging.mjs` 可用任意 `--version` 生成发布资料，若把某个版本的
     // 验收结论写死在脚本里，就会产出"v0.1.4 的标题 + 声明 v0.1.3 验收"的自相矛盾资料。
     // 本用例用**未登记验收的合成版本**驱动同一条路径，断言产物中不出现其它版本的说法。
-    const synthetic = '0.1.4-test'
+    const synthetic = '9.9.9'
     const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-version-'))
     try {
       const license = resolve(temporary, 'license.json')
       const sbom = resolve(temporary, 'sbom.json')
       const report = resolve(temporary, 'package-report.json')
       const security = resolve(temporary, 'security-audit.json')
-      const windowsInstaller = resolve(temporary, 'source.exe')
+      const windowsInstaller = resolve(temporary, 'DeepShell Agent_9.9.9_x64-setup.exe')
+      const dmgDirectory = resolve(temporary, 'dmg')
       const output = resolve(temporary, 'release')
+      await mkdir(dmgDirectory)
       await writeFile(windowsInstaller, 'windows')
       for (const path of [license, sbom, report, security]) {
         await writeFile(path, `{"application":{"version":"${synthetic}"}}\n`)
@@ -193,6 +242,7 @@ describe('v0.1.1 release hardening scripts', () => {
         'scripts/release-staging.mjs',
         '--version', synthetic,
         '--output-dir', output,
+        '--dmg-dir', dmgDirectory,
         '--windows-installer', windowsInstaller,
         '--license-inventory', license,
         '--sbom', sbom,

@@ -5,8 +5,13 @@ import { currentRuntimePlatform, root } from './lib/runtime.mjs'
 import { redactedJson } from './lib/redaction.mjs'
 import { normalizedTreeManifest } from './lib/tree-manifest.mjs'
 import { platformInputDigest } from './lib/source-inputs.mjs'
-import { summarizeInspections } from './lib/package-manifest.mjs'
-import { uniqueMatchingArtifact } from './lib/artifact-selection.mjs'
+import { summarizeInspections, validatePackageManifestV5 } from './lib/package-manifest.mjs'
+import {
+  assertArtifactNameMatchesVersion,
+  isMacosDmgName,
+  isWindowsNsisInstallerName,
+  selectWindowsNsisInstallerName,
+} from './lib/artifact-selection.mjs'
 
 function argValue(name, fallback) {
   const prefix = `${name}=`
@@ -47,11 +52,7 @@ async function fileMetric(path) {
 async function exactWindowsInstaller(version) {
   const directory = resolve(root, 'src-tauri/target/release/bundle/nsis')
   if (!await exists(directory)) return null
-  const name = uniqueMatchingArtifact(
-    await readdir(directory),
-    file => extname(file).toLowerCase() === '.exe' && file.includes(version) && file.toLowerCase().endsWith('-setup.exe'),
-    `Windows ${version} installer`,
-  )
+  const name = selectWindowsNsisInstallerName((await readdir(directory)).filter(file => extname(file).toLowerCase() === '.exe'), version)
   return name === null ? null : resolve(directory, name)
 }
 
@@ -65,7 +66,9 @@ async function optionalJson(path) {
 }
 
 const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
+const baselineFixture = await optionalJson(resolve(root, 'tests/fixtures/package-size-baselines/v0.1.3.json'))
 const version = argValue('--version', pkg.version)
+const allowMissingReleaseManifests = process.argv.includes('--allow-missing-release-manifests')
 const outputDirectory = resolve(argValue('--output-dir', resolve(root, 'runtime/staging', `release-v${version}`)))
 await mkdir(outputDirectory, { recursive: true })
 const appPath = resolve(argValue('--app', resolve(root, 'src-tauri/target/release/bundle/macos/DeepShell Agent.app')))
@@ -79,15 +82,19 @@ const explicitWindowsInstaller = windowsInstallerArg !== undefined
 const windowsInstaller = windowsInstallerArg === undefined ? await exactWindowsInstaller(version) : resolve(windowsInstallerArg)
 const dmgMetric = async () => {
   if (dmg === null) return { status: 'missing' }
-  if (!explicitDmg && !basename(dmg).includes(version)) {
+  if (!explicitDmg && !isMacosDmgName(basename(dmg), version)) {
     return { status: 'stale-version', asset: basename(dmg), expectedVersion: version }
   }
+  if (explicitDmg) assertArtifactNameMatchesVersion(basename(dmg), version, 'macOS DMG', isMacosDmgName)
   return fileMetric(dmg)
 }
 const windowsInstallerMetric = async () => {
   if (windowsInstaller === null) return { status: 'missing' }
-  if (!explicitWindowsInstaller && !basename(windowsInstaller).includes(version)) {
+  if (!explicitWindowsInstaller && !isWindowsNsisInstallerName(basename(windowsInstaller), version)) {
     return { status: 'stale-version', asset: basename(windowsInstaller), expectedVersion: version }
+  }
+  if (explicitWindowsInstaller) {
+    assertArtifactNameMatchesVersion(basename(windowsInstaller), version, 'Windows installer', isWindowsNsisInstallerName)
   }
   return fileMetric(windowsInstaller)
 }
@@ -111,64 +118,208 @@ const releaseDmgManifest = process.platform === 'darwin' && dmgManifestArgument 
 const runtimePlatform = currentRuntimePlatform()
 const currentSourceInputSha256 = await platformInputDigest(root, runtimePlatform)
 const sourceDigestField = runtimePlatform === 'darwin-arm64' ? 'macosSourceInputSha256' : 'windowsSourceInputSha256'
+const expectedReleaseArtifactKind = runtimePlatform === 'darwin-arm64' ? 'macos-app' : 'nsis-installer'
 
-function manifestSummary(manifest) {
-  if (manifest === null) return { status: 'missing' }
-  if (manifest.schemaVersion !== 5 || manifest.mode !== 'release' || manifest.applicationVersion !== version ||
-      manifest.platform !== runtimePlatform || manifest[sourceDigestField] !== currentSourceInputSha256) {
-    return {
-      status: 'stale-or-incompatible',
-      schemaVersion: manifest.schemaVersion ?? null,
-      artifactKind: manifest.artifactKind ?? null,
+function baselineForArtifactKind(artifactKind) {
+  return {
+    'macos-app': baselineFixture?.artifacts?.macosApp,
+    'macos-dmg': baselineFixture?.artifacts?.macosDmg,
+    'nsis-installer': baselineFixture?.artifacts?.windowsNsis,
+  }[artifactKind] ?? null
+}
+
+function incompatibleManifestSummary(label, manifest, reasons) {
+  if (!allowMissingReleaseManifests) {
+    throw new Error(`${label} 不可用于 release package report：${reasons.join('；')}`)
+  }
+  return {
+    status: 'stale-or-incompatible',
+    schemaVersion: manifest?.schemaVersion ?? null,
+    artifactKind: manifest?.artifactKind ?? null,
+    reasons,
+  }
+}
+
+function manifestSummary(manifest, label, expectedArtifactKind, required) {
+  if (manifest === null) {
+    if (required && !allowMissingReleaseManifests) {
+      throw new Error(`${label} 缺失，release package report 必须基于当前 schema 5 manifest`)
+    }
+    return { status: 'missing' }
+  }
+  validatePackageManifestV5(manifest)
+  const reasons = []
+  if (manifest.mode !== 'release') reasons.push(`mode=${manifest.mode}`)
+  if (manifest.applicationVersion !== version) reasons.push(`version=${manifest.applicationVersion}`)
+  if (manifest.platform !== runtimePlatform) reasons.push(`platform=${manifest.platform}`)
+  if (manifest.artifactKind !== expectedArtifactKind) reasons.push(`artifactKind=${manifest.artifactKind}`)
+  if (manifest[sourceDigestField] !== currentSourceInputSha256) reasons.push('source input digest 已过期')
+  if (baselineFixture === null) {
+    reasons.push('baseline fixture 缺失')
+  } else {
+    const baselineArtifact = baselineForArtifactKind(manifest.artifactKind)
+    if (manifest.baseline?.canonicalSourceRef !== baselineFixture.canonicalSource?.tag) reasons.push('baseline tag 不匹配')
+    if (manifest.baseline?.canonicalSourceCommit !== baselineFixture.canonicalSource?.peeledCommit) reasons.push('baseline commit 不匹配')
+    if (manifest.baseline?.baselineSourceInputSha256 !== baselineFixture.canonicalSource?.baselineSourceInputSha256) {
+      reasons.push('baseline source input digest 不匹配')
+    }
+    if (manifest.baseline?.algorithmVersion !== baselineFixture.measurement?.algorithm) reasons.push('baseline algorithm 不匹配')
+    if (baselineArtifact !== null && manifest.baseline?.status !== baselineArtifact.status) {
+      reasons.push(`baseline status=${manifest.baseline?.status}`)
+    }
+    if (baselineArtifact?.contentSha256 && manifest.baseline?.treeContentSha256 !== baselineArtifact.contentSha256) {
+      reasons.push('baseline tree content hash 不匹配')
+    }
+    if (baselineArtifact?.sha256 && manifest.baseline?.artifactSha256 !== baselineArtifact.sha256) {
+      reasons.push('baseline artifact hash 不匹配')
     }
   }
+  if (reasons.length > 0) return incompatibleManifestSummary(label, manifest, reasons)
   return {
     status: 'present',
     schemaVersion: manifest.schemaVersion,
     artifactKind: manifest.artifactKind,
     resourceCount: Array.isArray(manifest.resources) ? manifest.resources.length : 0,
+    baseline: manifest.baseline,
     inspections: summarizeInspections(manifest.inspections ?? []),
   }
 }
-const releaseManifestSummary = manifestSummary(releaseManifest)
-const releaseDmgManifestSummary = manifestSummary(releaseDmgManifest)
-const appMetrics = await directoryMetrics(appPath)
-const dmgMetrics = await dmgMetric()
-const windowsInstallerMetrics = await windowsInstallerMetric()
-if (releaseManifestSummary.status === 'present' && appMetrics.status === 'present') {
+const releaseManifestSummary = manifestSummary(releaseManifest, 'release package manifest', expectedReleaseArtifactKind, true)
+const releaseDmgManifestSummary = manifestSummary(
+  releaseDmgManifest,
+  'release DMG manifest',
+  'macos-dmg',
+  runtimePlatform === 'darwin-arm64',
+)
+function presentManifest(manifest, summary) {
+  return manifest !== null && summary.status === 'present' ? manifest : null
+}
+
+function inspectionMetric(manifest, subject) {
+  const inspection = manifest?.inspections?.find(item => item.subject === subject)
+  if (!inspection) return null
+  return {
+    status: inspection.status === 'equivalent' ? 'present' : inspection.status,
+    bytes: inspection.size.bytes,
+    files: inspection.size.files,
+    runtimePlatforms: inspection.runtimePlatforms,
+    ...(inspection.sha256 ? { sha256: inspection.sha256 } : {}),
+    ...(inspection.contentSha256 ? { contentSha256: inspection.contentSha256 } : {}),
+    ...(inspection.inspectionMode === 'file-metadata-only' && inspection.resources?.[0]
+      ? { asset: basename(inspection.resources[0].path) }
+      : {}),
+  }
+}
+
+function baselineArtifactFor(assetKey) {
+  if (!baselineFixture?.artifacts && !baselineFixture?.sourceTrees) return null
+  const runtimeNodeKey = runtimePlatform === 'darwin-arm64' ? 'darwinNode' : 'windowsNode'
+  return {
+    app: baselineFixture.artifacts?.macosApp,
+    dmg: baselineFixture.artifacts?.macosDmg,
+    windowsInstaller: baselineFixture.artifacts?.windowsNsis,
+    runtimeNode: baselineFixture.sourceTrees?.[runtimeNodeKey],
+    runtimeDsh: baselineFixture.sourceTrees?.dsh,
+    profileTemplate: baselineFixture.sourceTrees?.profileTemplate,
+  }[assetKey] ?? null
+}
+
+function attachBaselineDelta(metric, assetKey) {
+  const baseline = baselineArtifactFor(assetKey)
+  if (!metric || metric.status !== 'present' || baseline?.status !== 'canonical' && baseline?.status !== 'reference-only') return metric
+  return {
+    ...metric,
+    baselineVersion: baselineFixture.baselineVersion,
+    baselineStatus: baseline.status,
+    ...(Number.isSafeInteger(baseline.bytes) ? { deltaBytes: metric.bytes - baseline.bytes } : {}),
+    ...(Number.isSafeInteger(baseline.files) && Number.isSafeInteger(metric.files)
+      ? { deltaFiles: metric.files - baseline.files }
+      : {}),
+  }
+}
+
+function foreignRuntimePathsFromManifests(manifests) {
+  const expected = runtimePlatform
+  const paths = new Set()
+  for (const manifest of manifests.filter(Boolean)) {
+    for (const inspection of manifest.inspections ?? []) {
+      for (const resource of inspection.resources ?? []) {
+        const match = resource.path.match(/(^|\/)runtime\/node\/([^/]+)(\/|$)/)
+        if (match && match[2] !== expected) paths.add(resource.path)
+      }
+    }
+  }
+  return [...paths].sort()
+}
+
+const validReleaseManifest = presentManifest(releaseManifest, releaseManifestSummary)
+const validReleaseDmgManifest = presentManifest(releaseDmgManifest, releaseDmgManifestSummary)
+const fallbackAppMetrics = await directoryMetrics(appPath)
+const fallbackDmgMetrics = await dmgMetric()
+const fallbackWindowsInstallerMetrics = await windowsInstallerMetric()
+const appMetrics = attachBaselineDelta(inspectionMetric(validReleaseManifest, 'macos-app') ?? fallbackAppMetrics, 'app')
+const dmgMetrics = attachBaselineDelta(inspectionMetric(validReleaseDmgManifest, 'macos-dmg') ?? fallbackDmgMetrics, 'dmg')
+const windowsInstallerMetrics = attachBaselineDelta(
+  inspectionMetric(validReleaseManifest, 'nsis-installer') ?? fallbackWindowsInstallerMetrics,
+  'windowsInstaller',
+)
+const runtimeNodeMetrics = attachBaselineDelta(
+  inspectionMetric(validReleaseManifest, 'runtime-node') ??
+    await directoryMetrics(resolve(argValue('--runtime-node', resolve(root, `runtime/node/${runtimePlatform}`)))),
+  'runtimeNode',
+)
+const runtimeDshMetrics = attachBaselineDelta(
+  inspectionMetric(validReleaseManifest, 'runtime-dsh') ??
+    await directoryMetrics(resolve(argValue('--runtime-dsh', resolve(root, 'runtime/dsh')))),
+  'runtimeDsh',
+)
+const profileTemplateMetrics = attachBaselineDelta(
+  inspectionMetric(validReleaseManifest, 'profile-template') ??
+    await directoryMetrics(resolve(argValue('--profile-template', resolve(root, 'runtime/profile-template')))),
+  'profileTemplate',
+)
+if (releaseManifestSummary.status === 'present' && releaseManifest.artifactKind === 'macos-app') {
   const appInspection = releaseManifest.inspections.find(item => item.subject === 'macos-app')
-  if (appInspection && (appInspection.contentSha256 !== appMetrics.contentSha256 ||
-      appInspection.size?.bytes !== appMetrics.bytes || appInspection.size?.files !== appMetrics.files)) {
+  if (!appInspection || fallbackAppMetrics.status !== 'present' ||
+      appInspection.contentSha256 !== fallbackAppMetrics.contentSha256 ||
+      appInspection.size?.bytes !== fallbackAppMetrics.bytes || appInspection.size?.files !== fallbackAppMetrics.files) {
     throw new Error('package report 的 app 资产与 manifest 不一致')
   }
 }
-if (releaseDmgManifestSummary.status === 'present' && dmgMetrics.status === 'present') {
+if (releaseDmgManifestSummary.status === 'present') {
   const dmgInspection = releaseDmgManifest.inspections.find(item => item.subject === 'macos-dmg')
-  if (!dmgInspection || dmgInspection.sha256 !== dmgMetrics.sha256 || dmgInspection.size?.bytes !== dmgMetrics.bytes) {
+  if (!dmgInspection || fallbackDmgMetrics.status !== 'present' ||
+      dmgInspection.sha256 !== fallbackDmgMetrics.sha256 || dmgInspection.size?.bytes !== fallbackDmgMetrics.bytes) {
     throw new Error('package report 的 DMG 资产与 manifest 不一致')
   }
 }
-if (releaseManifestSummary.status === 'present' && releaseManifest.artifactKind === 'nsis-installer' &&
-    windowsInstallerMetrics.status === 'present') {
+if (releaseManifestSummary.status === 'present' && releaseManifest.artifactKind === 'nsis-installer') {
   const installerInspection = releaseManifest.inspections.find(item => item.subject === 'nsis-installer')
-  if (!installerInspection || installerInspection.sha256 !== windowsInstallerMetrics.sha256 ||
-      installerInspection.size?.bytes !== windowsInstallerMetrics.bytes) {
+  if (!installerInspection || fallbackWindowsInstallerMetrics.status !== 'present' ||
+      installerInspection.sha256 !== fallbackWindowsInstallerMetrics.sha256 ||
+      installerInspection.size?.bytes !== fallbackWindowsInstallerMetrics.bytes) {
     throw new Error('package report 的 Windows installer 与 manifest 不一致')
   }
+}
+const foreignRuntimePaths = foreignRuntimePathsFromManifests([validReleaseManifest, validReleaseDmgManifest])
+if (foreignRuntimePaths.length > 0) {
+  throw new Error(`package report 检测到异平台 Runtime：${foreignRuntimePaths.join(', ')}`)
 }
 const report = {
   schemaVersion: 2,
   application: { name: 'DeepShell Agent', version },
   generatedAt: new Date().toISOString(),
   platform: { os: process.platform, arch: process.arch },
+  baselineVersion: baselineFixture?.baselineVersion ?? null,
   assets: {
     app: appMetrics,
     dmg: dmgMetrics,
     windowsInstaller: windowsInstallerMetrics,
-    runtimeNode: await directoryMetrics(resolve(argValue('--runtime-node', resolve(root, 'runtime/node')))),
-    runtimeDsh: await directoryMetrics(resolve(argValue('--runtime-dsh', resolve(root, 'runtime/dsh')))),
-    profileTemplate: await directoryMetrics(resolve(argValue('--profile-template', resolve(root, 'runtime/profile-template')))),
+    runtimeNode: runtimeNodeMetrics,
+    runtimeDsh: runtimeDshMetrics,
+    profileTemplate: profileTemplateMetrics,
   },
+  foreignRuntimePaths,
   manifests: {
     releasePackageManifest: releaseManifestSummary,
     releaseDmgManifest: releaseDmgManifestSummary,
