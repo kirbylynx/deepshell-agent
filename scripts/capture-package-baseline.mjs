@@ -10,7 +10,7 @@ import { v013BaselineInputDigest } from './lib/source-inputs.mjs'
 import { verifyDmgContainsApp } from './lib/macos-dmg.mjs'
 
 const execFileAsync = promisify(execFile)
-export const EXPECTED_TAG_COMMIT = '34142a3e78f237b0c494551ffe4a8e309f3ab66a'
+export const EXPECTED_TAG_COMMIT = 'ca4add9dc52c5053278570abb28e1d21ae5a0239'
 export const EXPECTED_BASELINE_VERSION = '0.1.3'
 const EXPECTED_V013_PACKAGE_SOURCE_INPUT = 'bb6ed2bf88daafb90c7729335fa5d488be0e89b153f8324354a95c3c2757431d'
 const EXPECTED_BASELINE_SOURCE_INPUT = 'fbcd8ff948dd21a369ad296211bb885e9e0b96b3113b9157e671402c946dd51d'

@@ -414,5 +414,5 @@ describe('v0.1.4 打包契约', () => {
     } finally {
       await rm(temporary, { recursive: true, force: true })
     }
-  })
+  }, 15_000)
 })

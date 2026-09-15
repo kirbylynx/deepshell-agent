@@ -10,7 +10,7 @@ import { normalizedTreeManifest } from './lib/tree-manifest.mjs'
 import { validatePackageManifestV5 } from './lib/package-manifest.mjs'
 
 const execFileAsync = promisify(execFile)
-const EXPECTED_V013_COMMIT = '34142a3e78f237b0c494551ffe4a8e309f3ab66a'
+const EXPECTED_V013_COMMIT = 'ca4add9dc52c5053278570abb28e1d21ae5a0239'
 
 async function readJson(path) {
   return JSON.parse(await readFile(path, 'utf8'))

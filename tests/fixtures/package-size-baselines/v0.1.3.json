@@ -3,7 +3,7 @@
   "baselineVersion": "0.1.3",
   "canonicalSource": {
     "tag": "v0.1.3",
-    "peeledCommit": "34142a3e78f237b0c494551ffe4a8e309f3ab66a",
+    "peeledCommit": "ca4add9dc52c5053278570abb28e1d21ae5a0239",
     "baselineSourceInputSha256": "fbcd8ff948dd21a369ad296211bb885e9e0b96b3113b9157e671402c946dd51d"
   },
   "measurement": {
@@ -11,6 +11,24 @@
     "symlinks": "dereference-safe-files-within-trusted-subtree",
     "emptyDirectories": "ignored",
     "baselineInput": "git-blobs-v1"
+  },
+  "provenance": {
+    "checkoutPolicy": "exact v0.1.3 commit; no tracked, untracked, or ignored source/config drift outside generated-output allowlist",
+    "appInfoPlist": {
+      "bundleShortVersion": "0.1.3",
+      "infoPlistSha256": "910ec7b477fe56d2ba45d469a11791ca6654d30df0e0395ca1e1193bd690dd76",
+      "executable": "deepshell-agent"
+    },
+    "appMainExecutable": {
+      "status": "canonical",
+      "bytes": 8905584,
+      "files": 1,
+      "sha256": "f6ad8371563e393aa8ebb6e3658afb704f60aa21308bbfd4a589a3d4c6270747"
+    },
+    "packageManifest": {
+      "schemaVersion": 4,
+      "sourceInputSha256": "bb6ed2bf88daafb90c7729335fa5d488be0e89b153f8324354a95c3c2757431d"
+    }
   },
   "artifacts": {
     "macosApp": {
@@ -21,9 +39,9 @@
     },
     "macosDmg": {
       "status": "canonical",
-      "bytes": 286527606,
+      "bytes": 289373346,
       "files": 1,
-      "sha256": "6f76d820b30aa9d1bdd8d47457f7e9127b6b473c3b35c7e69258a0abfed67026"
+      "sha256": "0414ae9b3580cfa08078fd3ab9946c71b3b5d4e9a72b5abd98ccfe304afc07a5"
     },
     "windowsInstalledTree": {
       "status": "pending"

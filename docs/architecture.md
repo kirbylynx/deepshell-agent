@@ -444,7 +444,7 @@ V1 baseline target:
 | Platform | Status |
 |---|---|
 | macOS arm64 | MVP build path available; formal public binary release still requires Developer ID signing and notarization |
-| Windows x64 | **Acceptance completed in `v0.1.3` on real Windows x64 hardware** (installer, first run, data directory, credentials, sessions and tools, single instance, dynamic ports, malicious-origin isolation, exit cleanup, crash recovery, diagnostics bundle). Remaining gaps, recorded honestly: uninstall does not clean up fully when an orphan Sidecar is present (`REL-024`), Windows code signing, and web/code-signing-independent items listed in the `v0.1.3` closeout. |
+| Windows x64 | **Platform acceptance completed in `v0.1.3` on real Windows x64 hardware** for installer, first run, data directory, credentials, sessions and tools, single instance, dynamic ports, malicious-origin isolation, crash recovery, and diagnostics bundle. Exit/uninstall cleanup is not fully closed: `v0.1.3` includes a known leftover-Sidecar defect tracked as `REL-024`, and `v0.1.4` owns the follow-up fix and re-acceptance. Remaining gaps also include Windows code signing and web/code-signing-independent items listed in the `v0.1.3` closeout. |
 | Linux | Deferred |
 | Intel macOS / Windows arm64 | Deferred unless user demand changes priority |
 

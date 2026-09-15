@@ -14,7 +14,7 @@ import {
 
 const execFileAsync = promisify(execFile)
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
-const EXPECTED_V013_COMMIT = '34142a3e78f237b0c494551ffe4a8e309f3ab66a'
+const EXPECTED_V013_COMMIT = 'ca4add9dc52c5053278570abb28e1d21ae5a0239'
 
 describe('构建输入指纹', () => {
   it('任意被纳入的生命周期源码变化都会使旧指纹失效', async () => {
