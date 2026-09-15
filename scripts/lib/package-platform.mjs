@@ -21,8 +21,9 @@ import { selectWindowsNsisInstallerName } from './artifact-selection.mjs'
 
 const MACOS_APP = 'src-tauri/target/release/bundle/macos/DeepShell Agent.app'
 // ⚠️ 实测①（P6）：cargo 的二进制名取自 **crate 名**（`deepshell-agent`），**不是** `productName`。
-// `tauri build` 实际输出 `target/release/deepshell-agent.exe`；安装后的可执行文件名才由
-// `productName`（"DeepShell Agent"）决定。设计 §4.3 原先写作 `DeepShell Agent.exe`，已按实测纠正。
+// `tauri build` 实际输出 `target/release/deepshell-agent.exe`；W1 实测进一步确认 **NSIS 安装树内
+// 也保持 `deepshell-agent.exe`**，不随 productName 重命名。设计 §4.3 原先写作 `DeepShell Agent.exe`。
+// `DeepShell Agent.exe` 仅是 portable staging 的目标名，由 W2 的打包脚本复制生成（设计 D-1406）。
 const WINDOWS_BINARY = 'src-tauri/target/release/deepshell-agent.exe'
 // 安装包（主产物）的输出目录。
 const WINDOWS_NSIS_DIRECTORY = 'src-tauri/target/release/bundle/nsis'
@@ -165,9 +166,9 @@ function windowsAdapter(lock, artifactKind = 'nsis-installer', options = {}) {
       platform: 'win32', runtimePlatform: currentRuntimePlatform,
       artifactKind, artifactPath: tree, primaryTreePath: tree,
       resourcesRoot: tree, intermediateRoot: tree,
-      binaryPath: resolve(tree, 'DeepShell Agent.exe'),
+      binaryPath: resolve(tree, 'deepshell-agent.exe'),
       requiredArtifacts: [
-        'DeepShell Agent.exe',
+        'deepshell-agent.exe',
         'runtime/node/win32-x64/node.exe',
         `runtime/dsh/${lock.dsh.entry}`,
         'runtime/profile-template/template-manifest.json',
@@ -189,6 +190,7 @@ function windowsAdapter(lock, artifactKind = 'nsis-installer', options = {}) {
       artifactKind, artifactPath: resolve(options.archivePath), primaryTreePath: stagingPath,
       stagingPath, extractedPath: resolve(options.extractedPath),
       resourcesRoot: stagingPath, intermediateRoot: stagingPath,
+      // portable staging 的目标二进制名由 W2 的打包脚本创建（设计 D-1406 的 ZIP 布局）。
       binaryPath: resolve(stagingPath, 'DeepShell Agent.exe'),
       requiredArtifacts: [
         'DeepShell Agent.exe',

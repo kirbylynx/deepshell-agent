@@ -17,10 +17,16 @@ const requestedKind = process.argv[3]
 if (!['e2e', 'release'].includes(mode)) {
   throw new Error('用法：capture-package-manifest.mjs <e2e|release> [artifact-kind]')
 }
+const installedTreeArgumentIndex = process.argv.indexOf('--installed-tree')
+const installedTreeArgument = installedTreeArgumentIndex >= 0 ? process.argv[installedTreeArgumentIndex + 1] : undefined
+if (requestedKind === 'windows-installed-tree' && !installedTreeArgument) {
+  throw new Error('用法：capture-package-manifest.mjs <e2e|release> windows-installed-tree --installed-tree <path>')
+}
 
 const lock = await readLock()
 const rootPackage = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
-const adapter = packageAdapter(process.platform, lock, requestedKind)
+const adapterOptions = requestedKind === 'windows-installed-tree' ? { artifactPath: installedTreeArgument } : undefined
+const adapter = packageAdapter(process.platform, lock, requestedKind, adapterOptions)
 await requireArtifactReady(adapter, access)
 await access(adapter.resourcesRoot)
 await access(adapter.intermediateRoot)
@@ -78,7 +84,9 @@ function baselineFor(artifactKind) {
     ? baselineFixture.artifacts.macosDmg
     : artifactKind === 'macos-app'
       ? baselineFixture.artifacts.macosApp
-      : artifactKind === 'nsis-installer' ? baselineFixture.artifacts.windowsNsis : null
+      : artifactKind === 'windows-installed-tree'
+        ? baselineFixture.artifacts.windowsInstalledTree
+        : artifactKind === 'nsis-installer' ? baselineFixture.artifacts.windowsNsis : null
   return {
     status: artifact?.status ?? 'pending',
     ...(artifact?.reason ? { reason: artifact.reason } : {}),
@@ -155,6 +163,43 @@ if (adapter.platform === 'darwin') {
     runtimeInspectionStatus: 'unverified-until-installed-tree-inspection',
     size: { bytes: (await stat(adapter.artifactPath)).size, files: 1 },
     sha256: digest(content),
+  })
+} else if (adapter.artifactKind === 'windows-installed-tree') {
+  // 安装树是唯一可遍历证明 NSIS 内容的 subject（设计 §4.3/§4.4）：
+  // Runtime/DSH/Profile 子树必须与经过 runtime:verify/profile:verify 的源子树逐项等价。
+  const tree = adapter.primaryTreePath
+  const mappings = [
+    ['runtime-node', resolve(root, 'runtime/node/win32-x64'), resolve(tree, 'runtime/node/win32-x64'), ['win32-x64']],
+    ['runtime-dsh', resolve(root, 'runtime/dsh'), resolve(tree, 'runtime/dsh'), []],
+    ['profile-template', resolve(root, 'runtime/profile-template'), resolve(tree, 'runtime/profile-template'), []],
+  ]
+  for (const [subject, source, target, subjectRuntimePlatforms] of mappings) {
+    const equivalence = await assertEquivalentTrees(source, target, subject)
+    inspections.push({
+      subject,
+      inspectionMode: 'exact-artifact-tree',
+      status: 'equivalent',
+      resources: equivalence.target.entries,
+      runtimePlatforms: subjectRuntimePlatforms,
+      size: { bytes: equivalence.target.bytes, files: equivalence.target.files },
+      contentSha256: equivalence.target.contentSha256,
+    })
+  }
+  const treeManifest = await normalizedTreeManifest(tree)
+  const platformMatch = path => path.match(/(^|\/)runtime\/node\/([^/]+)(\/|$)/)
+  const foreignRuntime = treeManifest.entries.find(entry => {
+    const match = platformMatch(entry.path)
+    return match !== null && match[2] !== 'win32-x64'
+  })
+  if (foreignRuntime) throw new Error(`Windows installed tree 包含异平台 Runtime：${foreignRuntime.path}`)
+  inspections.push({
+    subject: 'windows-installed-tree',
+    inspectionMode: 'exact-installed-tree',
+    status: 'present',
+    resources: treeManifest.entries,
+    runtimePlatforms: runtimePlatforms(treeManifest.entries),
+    size: { bytes: treeManifest.bytes, files: treeManifest.files },
+    contentSha256: treeManifest.contentSha256,
   })
 }
 

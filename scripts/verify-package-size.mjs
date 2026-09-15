@@ -91,10 +91,75 @@ if (process.platform === 'darwin') {
   }
   console.log(JSON.stringify(result))
 } else if (process.platform === 'win32') {
-  if (baseline.artifacts.windowsInstalledTree?.status !== 'canonical') {
-    throw new Error('Windows installed-tree baseline 仍为 pending，Windows size gate 必须阻塞')
+  const [installedTreeManifest, nsisManifest] = await Promise.all([
+    readJson(resolve(root, 'runtime/staging/package-release-win32-x64-windows-installed-tree.json')),
+    readJson(resolve(root, 'runtime/staging/package-release-win32-x64-nsis-installer.json')),
+  ])
+  validatePackageManifestV5(installedTreeManifest)
+  validatePackageManifestV5(nsisManifest)
+  const currentSourceInput = await platformInputDigest(root, 'win32-x64')
+  for (const manifest of [installedTreeManifest, nsisManifest]) {
+    if (manifest.platform !== 'win32-x64') {
+      throw new Error('Windows size gate 要求当前平台的 schemaVersion 5 manifest')
+    }
+    if (manifest.windowsSourceInputSha256 !== currentSourceInput) {
+      throw new Error(`${manifest.artifactKind} manifest 已与当前 Windows 构建输入不同，必须重建`)
+    }
+    if (manifest.mode !== 'release') {
+      throw new Error(`Windows size gate 收到了错误 mode：${manifest.mode}`)
+    }
   }
-  throw new Error('Windows size gate 将在 W0/W1 接管 installed-tree 产物后启用')
+  if (installedTreeManifest.artifactKind !== 'windows-installed-tree' ||
+      nsisManifest.artifactKind !== 'nsis-installer') {
+    throw new Error('Windows size gate 收到了错误的 artifactKind')
+  }
+  const installedTree = inspection(installedTreeManifest, 'windows-installed-tree', 'exact-installed-tree')
+  inspection(installedTreeManifest, 'runtime-node', 'exact-artifact-tree')
+  inspection(installedTreeManifest, 'runtime-dsh', 'exact-artifact-tree')
+  inspection(installedTreeManifest, 'profile-template', 'exact-artifact-tree')
+  const nsis = inspection(nsisManifest, 'nsis-installer', 'file-metadata-only')
+
+  // 可选一致性核对：传入实际安装树路径时，重新测量并要求与 manifest 完全一致
+  // （防止清单过期；不传则只做 manifest-vs-baseline 门禁）。
+  const installedTreeIndex = process.argv.indexOf('--installed-tree')
+  const installedTreePath = installedTreeIndex >= 0 ? resolve(process.argv[installedTreeIndex + 1]) : null
+  if (installedTreePath !== null) {
+    const actual = await normalizedTreeManifest(installedTreePath)
+    if (installedTree.contentSha256 !== actual.contentSha256 ||
+        installedTree.size.bytes !== actual.bytes || installedTree.size.files !== actual.files) {
+      throw new Error('windows-installed-tree manifest 与当前安装树不一致，必须重建')
+    }
+  }
+
+  const platformMatch = path => path.match(/(^|\/)runtime\/node\/([^/]+)(\/|$)/)
+  const foreignRuntimePaths = new Set()
+  for (const manifest of [installedTreeManifest, nsisManifest]) {
+    for (const inspectionEntry of manifest.inspections) {
+      for (const resource of inspectionEntry.resources) {
+        const match = platformMatch(resource.path)
+        if (match && match[2] !== 'win32-x64') foreignRuntimePaths.add(resource.path)
+      }
+    }
+  }
+  if (foreignRuntimePaths.size > 0) {
+    throw new Error(`Windows 产物检测到异平台 Runtime：${[...foreignRuntimePaths].sort().join(', ')}`)
+  }
+
+  const result = {
+    ok: true,
+    platform: 'win32-x64',
+    windowsInstalledTree: verifyReducedTree(
+      { status: installedTree.status, ...installedTree.size },
+      baseline.artifacts.windowsInstalledTree,
+      'Windows installed tree',
+    ),
+    windowsNsis: verifyReducedFile(
+      { status: nsis.status, ...nsis.size },
+      baseline.artifacts.windowsNsis,
+      'Windows NSIS',
+    ),
+  }
+  console.log(JSON.stringify(result))
 } else {
   throw new Error(`不支持的 size gate 平台：${process.platform}`)
 }
