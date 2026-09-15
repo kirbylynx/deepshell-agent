@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process'
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { access, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -96,6 +96,79 @@ describe('v0.1.1 release hardening scripts', () => {
     }
   })
 
+  it('package report 默认写 output 外路径，release staging 默认读取同一路径', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-report-stage-chain-'))
+    const defaultPackageReport = resolve(root, 'runtime/staging/package-report.json')
+    const staleReleaseReport = resolve(root, 'runtime/staging/release-v9.8.7/package-report.json')
+    let originalReport: string | null = null
+    try {
+      try {
+        originalReport = await readFile(defaultPackageReport, 'utf8')
+      } catch {
+        originalReport = null
+      }
+      await rm(resolve(root, 'runtime/staging/release-v9.8.7'), { recursive: true, force: true })
+      const version = '9.8.7'
+      const app = resolve(temporary, 'DeepShell Agent.app')
+      const node = resolve(temporary, 'node')
+      const dsh = resolve(temporary, 'dsh')
+      const profile = resolve(temporary, 'profile')
+      await mkdir(resolve(app, 'Contents'), { recursive: true })
+      await mkdir(node)
+      await mkdir(dsh)
+      await mkdir(profile)
+      await writeFile(resolve(app, 'Contents/file.txt'), 'app')
+      await writeFile(resolve(node, 'node.txt'), 'node')
+      await writeFile(resolve(dsh, 'dsh.txt'), 'dsh')
+      await writeFile(resolve(profile, 'profile.txt'), 'profile')
+      const dmg = resolve(temporary, `DeepShell Agent_${version}_aarch64.dmg`)
+      const windowsInstaller = resolve(temporary, `DeepShell Agent_${version}_x64-setup.exe`)
+      const support = resolve(temporary, 'support.json')
+      await writeFile(dmg, 'dmg')
+      await writeFile(windowsInstaller, 'windows')
+      await writeFile(support, `{"application":{"version":"${version}"}}\n`)
+      await runNode([
+        'scripts/collect-package-report.mjs',
+        '--version', version,
+        '--app', app,
+        '--dmg', dmg,
+        '--windows-installer', windowsInstaller,
+        '--runtime-node', node,
+        '--runtime-dsh', dsh,
+        '--profile-template', profile,
+        '--license-inventory', support,
+        '--package-manifest', 'none',
+        '--dmg-manifest', 'none',
+        '--allow-missing-release-manifests'
+      ])
+      await expect(access(staleReleaseReport)).rejects.toThrow()
+
+      const output = resolve(temporary, 'release')
+      await runNode([
+        'scripts/release-staging.mjs',
+        '--version', version,
+        '--output-dir', output,
+        '--dmg', dmg,
+        '--windows-installer', windowsInstaller,
+        '--license-inventory', support,
+        '--sbom', support,
+        '--security-audit', support
+      ])
+      const stagedReport = await readFile(resolve(output, `deepshell-agent-v${version}-package-report.json`), 'utf8')
+      const report = JSON.parse(stagedReport)
+      expect(report.schemaVersion).toBe(2)
+      expect(report.application.version).toBe(version)
+    } finally {
+      if (originalReport === null) {
+        await rm(defaultPackageReport, { force: true })
+      } else {
+        await writeFile(defaultPackageReport, originalReport)
+      }
+      await rm(resolve(root, 'runtime/staging/release-v9.8.7'), { recursive: true, force: true })
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
   it('生成 release staging 资产、SHA256SUMS 和本地 release notes 草稿', async () => {
     const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-'))
     try {
@@ -140,6 +213,187 @@ describe('v0.1.1 release hardening scripts', () => {
       // 这一不变式，而不是锁定某一句话。
       expect(notes).toContain('## Distribution status')
       expect(notes).toContain('Windows x64:')
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('release staging 连续重跑会替换为新快照，且默认从 output 外读取 package report', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-rerun-'))
+    const defaultPackageReport = resolve(root, 'runtime/staging/package-report.json')
+    let originalReport: string | null = null
+    try {
+      try {
+        originalReport = await readFile(defaultPackageReport, 'utf8')
+      } catch {
+        originalReport = null
+      }
+      const output = resolve(temporary, 'release')
+      const license = resolve(temporary, 'license.json')
+      const sbom = resolve(temporary, 'sbom.json')
+      const security = resolve(temporary, 'security-audit.json')
+      const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
+      const windowsInstaller = resolve(temporary, 'DeepShell Agent_0.1.4_x64-setup.exe')
+      for (const path of [license, sbom, security]) {
+        await writeFile(path, '{"application":{"version":"0.1.4"}}\n')
+      }
+      await writeFile(dmg, 'dmg')
+      await writeFile(windowsInstaller, 'windows')
+      await mkdir(resolve(root, 'runtime/staging'), { recursive: true })
+      await runNode([
+        'scripts/release-staging.mjs',
+        '--version', '0.1.4',
+        '--output-dir', output,
+        '--dmg', dmg,
+        '--windows-installer', windowsInstaller,
+        '--license-inventory', license,
+        '--sbom', sbom,
+        '--package-report', license,
+        '--security-audit', security
+      ])
+
+      await writeFile(defaultPackageReport, '{"application":{"version":"0.1.4"},"source":"default-outside-output"}\n')
+      const emptyDmgDirectory = resolve(temporary, 'dmg')
+      const emptyInstallerDirectory = resolve(temporary, 'nsis')
+      await mkdir(emptyDmgDirectory)
+      await mkdir(emptyInstallerDirectory)
+      await runNode([
+        'scripts/release-staging.mjs',
+        '--version', '0.1.4',
+        '--output-dir', output,
+        '--dmg-dir', emptyDmgDirectory,
+        '--windows-installer-dir', emptyInstallerDirectory,
+        '--license-inventory', license,
+        '--sbom', sbom,
+        '--security-audit', security
+      ])
+
+      await expect(access(resolve(output, 'DeepShell.Agent_0.1.4_x64-setup.exe'))).rejects.toThrow()
+      const copiedReport = await readFile(resolve(output, 'deepshell-agent-v0.1.4-package-report.json'), 'utf8')
+      expect(copiedReport).toContain('"source":"default-outside-output"')
+      const manifest = JSON.parse(await readFile(resolve(output, 'release-manifest.json'), 'utf8'))
+      expect(manifest.assets.find((asset: { label: string }) => asset.label === 'windows-nsis').status).toBe('missing')
+    } finally {
+      if (originalReport === null) {
+        await rm(defaultPackageReport, { force: true })
+      } else {
+        await writeFile(defaultPackageReport, originalReport)
+      }
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('release staging 拒绝替换非专用非空目录和位于 output 内的显式输入', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-output-guard-'))
+    try {
+      const output = resolve(temporary, 'release')
+      const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
+      const support = resolve(temporary, 'support.json')
+      await mkdir(output)
+      await writeFile(resolve(output, 'unrelated.txt'), 'do-not-delete')
+      await writeFile(dmg, 'dmg')
+      await writeFile(support, '{"application":{"version":"0.1.4"}}\n')
+
+      await expect(runNode([
+        'scripts/release-staging.mjs',
+        '--version', '0.1.4',
+        '--output-dir', output,
+        '--dmg', dmg,
+        '--license-inventory', support,
+        '--sbom', support,
+        '--package-report', support,
+        '--security-audit', support
+      ])).rejects.toThrow(/缺少 release-manifest sentinel/)
+      expect(await readFile(resolve(output, 'unrelated.txt'), 'utf8')).toBe('do-not-delete')
+
+      const safeOutput = resolve(temporary, 'safe-release')
+      await expect(runNode([
+        'scripts/release-staging.mjs',
+        '--version', '0.1.4',
+        '--output-dir', safeOutput,
+        '--dmg', dmg,
+        '--license-inventory', support,
+        '--sbom', support,
+        '--package-report', resolve(safeOutput, 'package-report.json'),
+        '--security-audit', support
+      ])).rejects.toThrow(/显式输入不能位于将被替换/)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('release staging 新 output 提交后 backup 清理失败只警告并保留新快照', async () => {
+    const { replaceDirectory } =
+      // @ts-expect-error 该脚本是 CLI，同时导出少量 guard 供聚焦测试使用。
+      await import('../../scripts/release-staging.mjs')
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-rollback-'))
+    const warnings: string[] = []
+    const originalWarn = console.warn
+    try {
+      const output = resolve(temporary, 'release')
+      const staging = resolve(temporary, 'staging')
+      await mkdir(output)
+      await mkdir(staging)
+      await writeFile(resolve(output, 'old.txt'), 'old-output')
+      await writeFile(resolve(staging, 'new.txt'), 'new-output')
+      console.warn = (message?: unknown) => { warnings.push(String(message)) }
+      await replaceDirectory(staging, output, {
+        exists: async (path: string) => access(path).then(() => true, () => false),
+        rename,
+        rm: async (path: string, options: { recursive?: boolean, force?: boolean }) => {
+          if (path.includes('-previous-')) {
+            await rm(resolve(path, 'old.txt'), { force: true })
+            throw new Error('simulated partial backup cleanup failure')
+          }
+          return rm(path, options)
+        },
+      })
+      expect(await readFile(resolve(output, 'new.txt'), 'utf8')).toBe('new-output')
+      await expect(access(resolve(output, 'old.txt'))).rejects.toThrow()
+      expect(warnings.join('\n')).toContain('backup cleanup failed')
+      expect((await readdir(temporary)).some(entry => entry.includes('-previous-'))).toBe(true)
+    } finally {
+      console.warn = originalWarn
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('release staging 失败时保留既有正式目录，不留下半成品', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-failure-'))
+    try {
+      const output = resolve(temporary, 'release')
+      const good = resolve(temporary, 'good.json')
+      const bad = resolve(temporary, 'bad.json')
+      const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
+      await writeFile(good, '{"application":{"version":"0.1.4"}}\n')
+      await writeFile(bad, '{"application":{"version":"0.1.0"}}\n')
+      await writeFile(dmg, 'dmg')
+      await runNode([
+        'scripts/release-staging.mjs',
+        '--version', '0.1.4',
+        '--output-dir', output,
+        '--dmg', dmg,
+        '--license-inventory', good,
+        '--sbom', good,
+        '--package-report', good,
+        '--security-audit', good
+      ])
+      await writeFile(resolve(output, 'KEEP.txt'), 'old-snapshot')
+
+      await expect(runNode([
+        'scripts/release-staging.mjs',
+        '--version', '0.1.4',
+        '--output-dir', output,
+        '--dmg', dmg,
+        '--license-inventory', bad,
+        '--sbom', good,
+        '--package-report', good,
+        '--security-audit', good
+      ])).rejects.toThrow()
+
+      expect(await readFile(resolve(output, 'KEEP.txt'), 'utf8')).toBe('old-snapshot')
+      const manifest = JSON.parse(await readFile(resolve(output, 'release-manifest.json'), 'utf8'))
+      expect(manifest.assets.find((asset: { label: string }) => asset.label === 'macos-dmg').status).toBe('present')
     } finally {
       await rm(temporary, { recursive: true, force: true })
     }
@@ -314,6 +568,100 @@ describe('v0.1.1 release hardening scripts', () => {
     } finally {
       delete windowsAcceptance[injected]
     }
+  })
+
+  it('baseline 捕获拒绝源码/配置漂移和 rename/copy 任一异常端，但构建后允许明确生成目录和产物路径', async () => {
+    // @ts-expect-error 该脚本是 CLI，同时导出少量 guard 供聚焦测试使用。
+    const { parseBaselineStatusEntries, unexpectedBaselineStatusEntries } = await import('../../scripts/capture-package-baseline.mjs')
+    const renamedIntoGenerated = parseBaselineStatusEntries(
+      Buffer.from('R  dist/generated.js\0src-tauri/tauri.conf.json\0')
+    )
+    const typeChanges = parseBaselineStatusEntries(
+      Buffer.from('T  src-tauri/Cargo.toml\0 T src-tauri/build.rs\0')
+    )
+    expect(unexpectedBaselineStatusEntries([
+      '?? src-tauri/tauri.macos.conf.json',
+      '!! src-tauri/local.secret',
+      ...renamedIntoGenerated,
+      ...typeChanges,
+    ])).toEqual([
+      '?? src-tauri/tauri.macos.conf.json',
+      '!! src-tauri/local.secret',
+      'R  dist/generated.js\0src-tauri/tauri.conf.json',
+      'T  src-tauri/Cargo.toml',
+      ' T src-tauri/build.rs',
+    ])
+    expect(unexpectedBaselineStatusEntries([
+      ' M src-tauri/gen/schemas/desktop-schema.json',
+      '?? src-tauri/target/release/bundle/macos/DeepShell Agent.app/Contents/MacOS/deepshell-agent',
+      '!! dist/index.html',
+      '!! runtime/node/win32-x64/node.exe',
+      '!! runtime/dsh/node_modules/@deepseek-ai/dsh/package.json',
+      '?? artifacts/manual.dmg',
+    ], ['artifacts/manual.dmg'])).toEqual([])
+  })
+
+  it('baseline 初始检查拒绝已有生成残留，并锁定 install/rebuild command', async () => {
+    const { baselineInstallCommand, baselineRebuildCommand, unexpectedInitialBaselineStatusEntries } =
+      // @ts-expect-error 该脚本是 CLI，同时导出少量 guard 供聚焦测试使用。
+      await import('../../scripts/capture-package-baseline.mjs')
+    expect(baselineInstallCommand('pnpm')).toEqual({ command: 'pnpm', args: ['install', '--frozen-lockfile'] })
+    expect(baselineRebuildCommand('pnpm')).toEqual({ command: 'pnpm', args: ['package:verified'] })
+    expect(unexpectedInitialBaselineStatusEntries([
+      '!! node_modules/.pnpm/lock.yaml',
+      '!! dist/index.html',
+      '?? runtime/node/win32-x64/node.exe',
+      '?? src-tauri/target/release/deepshell-agent',
+    ])).toEqual([
+      '!! node_modules/.pnpm/lock.yaml',
+      '!! dist/index.html',
+      '?? runtime/node/win32-x64/node.exe',
+      '?? src-tauri/target/release/deepshell-agent',
+    ])
+  })
+
+  it('baseline 捕获只接受固定 release 产物路径，并强制写当前 canonical fixture', async () => {
+    const { assertCanonicalBaselineCapturePaths, canonicalBaselineArtifactPaths } =
+      // @ts-expect-error 该脚本是 CLI，同时导出少量 guard 供聚焦测试使用。
+      await import('../../scripts/capture-package-baseline.mjs')
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-baseline-paths-'))
+    try {
+      const canonical = canonicalBaselineArtifactPaths(temporary)
+      const output = resolve(root, 'tests/fixtures/package-size-baselines/v0.1.3.json')
+      expect(() => assertCanonicalBaselineCapturePaths(temporary, {
+        ...canonical,
+        output,
+      }, {
+        canonicalOutput: output,
+      })).not.toThrow()
+      expect(() => assertCanonicalBaselineCapturePaths(temporary, {
+        ...canonical,
+        app: resolve(temporary, 'old-artifacts/DeepShell Agent.app'),
+        output,
+      })).toThrow(/package:verified.*固定 release 产物路径/)
+      expect(() => assertCanonicalBaselineCapturePaths(temporary, {
+        ...canonical,
+        output: resolve(temporary, 'baseline.tmp.json'),
+      }, {
+        canonicalOutput: output,
+      })).toThrow(/必须写入当前 canonical fixture/)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('baseline 捕获拒绝 app Info.plist 版本漂移或缺失主二进制名', async () => {
+    // @ts-expect-error 该脚本是 CLI，同时导出少量 guard 供聚焦测试使用。
+    const { assertBaselineAppInfoPlist } = await import('../../scripts/capture-package-baseline.mjs')
+    const valid = [
+      '<plist><dict>',
+      '<key>CFBundleShortVersionString</key><string>0.1.3</string>',
+      '<key>CFBundleExecutable</key><string>DeepShell Agent</string>',
+      '</dict></plist>',
+    ].join('')
+    expect(assertBaselineAppInfoPlist(valid)).toEqual({ version: '0.1.3', executable: 'DeepShell Agent' })
+    expect(() => assertBaselineAppInfoPlist(valid.replace('0.1.3', '0.1.4'))).toThrow(/Info\.plist 版本不一致/)
+    expect(() => assertBaselineAppInfoPlist(valid.replace('<key>CFBundleExecutable</key><string>DeepShell Agent</string>', ''))).toThrow(/CFBundleExecutable/)
   })
 
   it('从 license inventory 派生 SBOM baseline', async () => {

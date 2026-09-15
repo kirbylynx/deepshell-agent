@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
-import { access, copyFile, mkdir, readdir, readFile, writeFile } from 'node:fs/promises'
-import { basename, extname, resolve } from 'node:path'
+import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { root } from './lib/runtime.mjs'
 import { redactedJson } from './lib/redaction.mjs'
 import { windowsManifestFields, windowsNotesLine } from './lib/windows-acceptance.mjs'
@@ -20,12 +21,56 @@ function argValue(name, fallback) {
   return index >= 0 ? process.argv[index + 1] : fallback
 }
 
+function explicitArgValue(name) {
+  const prefix = `${name}=`
+  const inline = process.argv.find(value => value.startsWith(prefix))
+  if (inline) return { explicit: true, value: inline.slice(prefix.length) }
+  const index = process.argv.indexOf(name)
+  return index >= 0 ? { explicit: true, value: process.argv[index + 1] } : { explicit: false }
+}
+
 async function exists(path) {
   try {
     await access(path)
     return true
   } catch {
     return false
+  }
+}
+
+function isSameOrChild(path, parent) {
+  const child = resolve(path)
+  const base = resolve(parent)
+  const fromBase = relative(base, child)
+  return fromBase === '' || (!fromBase.startsWith('..') && !fromBase.startsWith(sep))
+}
+
+function assertExplicitInputOutsideOutput(option, outputDirectory) {
+  const input = explicitArgValue(option)
+  if (input.explicit && isSameOrChild(input.value, outputDirectory)) {
+    throw new Error(`${option} 显式输入不能位于将被替换的 release staging output 内：${input.value}`)
+  }
+}
+
+async function assertOutputDirectoryMayBeReplaced(version, outputDirectory) {
+  if (!await exists(outputDirectory)) return
+  let entries
+  try {
+    entries = await readdir(outputDirectory)
+  } catch {
+    throw new Error(`release staging output 必须是目录：${outputDirectory}`)
+  }
+  if (entries.length === 0) return
+  const manifestPath = resolve(outputDirectory, 'release-manifest.json')
+  let manifest
+  try {
+    manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
+  } catch {
+    throw new Error(`拒绝替换非空且缺少 release-manifest sentinel 的目录：${outputDirectory}`)
+  }
+  const actualVersion = manifest.application?.version
+  if (manifest.application?.name !== 'DeepShell Agent' || actualVersion !== version) {
+    throw new Error(`拒绝替换 release-manifest sentinel 不匹配的目录：expected ${version}, got ${actualVersion ?? 'unknown'}`)
   }
 }
 
@@ -66,102 +111,155 @@ async function copyJsonIfPresent(source, target, assets, label, version) {
     assets.push({ label, status: 'missing', asset: basename(target) })
     return
   }
-  const json = JSON.parse(await readFile(source, 'utf8'))
+  const content = await readFile(source, 'utf8')
+  const json = JSON.parse(content)
   if (json.application?.version !== version) {
     throw new Error(`${label} 版本不一致：expected ${version}, got ${json.application?.version ?? 'unknown'}`)
   }
-  await copyFile(source, target)
+  await writeFile(target, content)
   assets.push({ label, status: 'present', asset: basename(target), sha256: await sha256(target) })
 }
 
-const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
-const version = argValue('--version', pkg.version)
-const outputDirectory = resolve(argValue('--output-dir', resolve(root, 'runtime/staging', `release-v${version}`)))
-await mkdir(outputDirectory, { recursive: true })
-
-const assets = []
-const dmgArg = argValue('--dmg', undefined)
-const dmg = dmgArg === undefined ? await currentDmg(version) : { status: 'present', path: resolve(dmgArg) }
-const windowsInstallerArg = argValue('--windows-installer', undefined)
-const windowsInstaller = windowsInstallerArg === undefined
-  ? await currentWindowsInstaller(version)
-  : { status: 'present', path: resolve(windowsInstallerArg) }
-if (dmg.status === 'missing') {
-  assets.push({ label: 'macos-dmg', status: 'missing', asset: `DeepShell.Agent_${version}_aarch64.dmg` })
-} else {
-  assertArtifactNameMatchesVersion(basename(dmg.path), version, 'macOS DMG', isMacosDmgName)
-  const target = resolve(outputDirectory, `DeepShell.Agent_${version}_aarch64.dmg`)
-  await copyFile(dmg.path, target)
-  assets.push({ label: 'macos-dmg', status: 'present', asset: basename(target), sha256: await sha256(target) })
+export async function replaceDirectory(stagingDirectory, outputDirectory, fs = { exists, rename, rm }) {
+  const backupDirectory = resolve(dirname(outputDirectory), `.${basename(outputDirectory)}-previous-${process.pid}-${Date.now()}`)
+  let movedExistingOutput = false
+  try {
+    if (await fs.exists(outputDirectory)) {
+      await fs.rename(outputDirectory, backupDirectory)
+      movedExistingOutput = true
+    }
+    await fs.rename(stagingDirectory, outputDirectory)
+    if (movedExistingOutput) {
+      try {
+        await fs.rm(backupDirectory, { recursive: true, force: true })
+      } catch (error) {
+        try {
+          await fs.rm(backupDirectory, { recursive: true, force: true })
+        } catch (retryError) {
+          console.warn(`release staging backup cleanup failed; committed output retained; backup may need manual cleanup: ${backupDirectory}: ${retryError?.message ?? error?.message ?? retryError}`)
+        }
+      }
+    }
+  } catch (error) {
+    if (movedExistingOutput && !await fs.exists(outputDirectory)) {
+      try {
+        await fs.rename(backupDirectory, outputDirectory)
+      } catch {
+        // 保留原始异常，避免把真正的 staging 失败原因掩盖掉。
+      }
+    }
+    throw error
+  }
 }
-if (windowsInstaller.status === 'missing') {
-  assets.push({ label: 'windows-nsis', status: 'missing', asset: `DeepShell.Agent_${version}_x64-setup.exe` })
-} else {
-  assertArtifactNameMatchesVersion(basename(windowsInstaller.path), version, 'Windows installer', isWindowsNsisInstallerName)
-  const target = resolve(outputDirectory, `DeepShell.Agent_${version}_x64-setup.exe`)
-  await copyFile(windowsInstaller.path, target)
-  assets.push({ label: 'windows-nsis', status: 'present', asset: basename(target), sha256: await sha256(target) })
+
+async function writeReleaseStaging(version, outputDirectory, stagingDirectory) {
+  const assets = []
+  const dmgArg = argValue('--dmg', undefined)
+  const dmg = dmgArg === undefined ? await currentDmg(version) : { status: 'present', path: resolve(dmgArg) }
+  const windowsInstallerArg = argValue('--windows-installer', undefined)
+  const windowsInstaller = windowsInstallerArg === undefined
+    ? await currentWindowsInstaller(version)
+    : { status: 'present', path: resolve(windowsInstallerArg) }
+  if (dmg.status === 'missing') {
+    assets.push({ label: 'macos-dmg', status: 'missing', asset: `DeepShell.Agent_${version}_aarch64.dmg` })
+  } else {
+    assertArtifactNameMatchesVersion(basename(dmg.path), version, 'macOS DMG', isMacosDmgName)
+    const target = resolve(stagingDirectory, `DeepShell.Agent_${version}_aarch64.dmg`)
+    await copyFile(dmg.path, target)
+    assets.push({ label: 'macos-dmg', status: 'present', asset: basename(target), sha256: await sha256(target) })
+  }
+  if (windowsInstaller.status === 'missing') {
+    assets.push({ label: 'windows-nsis', status: 'missing', asset: `DeepShell.Agent_${version}_x64-setup.exe` })
+  } else {
+    assertArtifactNameMatchesVersion(basename(windowsInstaller.path), version, 'Windows installer', isWindowsNsisInstallerName)
+    const target = resolve(stagingDirectory, `DeepShell.Agent_${version}_x64-setup.exe`)
+    await copyFile(windowsInstaller.path, target)
+    assets.push({ label: 'windows-nsis', status: 'present', asset: basename(target), sha256: await sha256(target) })
+  }
+  await copyJsonIfPresent(
+    resolve(argValue('--license-inventory', resolve(root, 'runtime/staging/license-inventory.json'))),
+    resolve(stagingDirectory, `deepshell-agent-v${version}-license-inventory.json`),
+    assets,
+    'license-inventory',
+    version
+  )
+  await copyJsonIfPresent(
+    resolve(argValue('--sbom', resolve(root, 'runtime/staging/sbom.json'))),
+    resolve(stagingDirectory, `deepshell-agent-v${version}-sbom.json`),
+    assets,
+    'sbom',
+    version
+  )
+  await copyJsonIfPresent(
+    resolve(argValue('--package-report', resolve(root, 'runtime/staging/package-report.json'))),
+    resolve(stagingDirectory, `deepshell-agent-v${version}-package-report.json`),
+    assets,
+    'package-report',
+    version
+  )
+  await copyJsonIfPresent(
+    resolve(argValue('--security-audit', resolve(root, 'runtime/staging/security-audit.json'))),
+    resolve(stagingDirectory, `deepshell-agent-v${version}-security-audit.json`),
+    assets,
+    'security-audit',
+    version
+  )
+
+  const presentAssets = assets.filter(asset => asset.status === 'present')
+  const sums = presentAssets.map(asset => `${asset.sha256}  ${asset.asset}`).join('\n')
+  await writeFile(resolve(stagingDirectory, 'SHA256SUMS.txt'), sums.length === 0 ? '' : `${sums}\n`)
+
+  const notes = [
+    `# DeepShell Agent v${version} Developer Preview`,
+    '',
+    'This draft is generated locally by `pnpm release:stage`.',
+    '',
+    '## Distribution status',
+    '',
+    '- macOS arm64: developer preview packaging lane.',
+    '- Code signing: ad-hoc/local signing only.',
+    '- Apple notarization: not performed.',
+    windowsNotesLine(version),
+    '',
+    '## Assets',
+    '',
+    ...assets.map(asset => `- ${asset.asset}: ${asset.status}`),
+    ''
+  ]
+  await writeFile(resolve(stagingDirectory, 'RELEASE_NOTES.md'), notes.join('\n'))
+  await writeFile(resolve(stagingDirectory, 'release-manifest.json'), redactedJson({
+    schemaVersion: 1,
+    application: { name: 'DeepShell Agent', version },
+    generatedAt: new Date().toISOString(),
+    assets,
+    publishPolicy: 'local staging only; GitHub release creation and asset upload require explicit user authorization',
+    // Windows 验收事实由 `lib/windows-acceptance.mjs` **按版本**提供，notes 与 manifest 共用同一份渲染，
+    // 因此两处不可能出现"版本与验收结论不一致"。未登记的版本会如实输出"无验收记录"。
+    ...windowsManifestFields(version)
+  }))
 }
-await copyJsonIfPresent(
-  resolve(argValue('--license-inventory', resolve(root, 'runtime/staging/license-inventory.json'))),
-  resolve(outputDirectory, `deepshell-agent-v${version}-license-inventory.json`),
-  assets,
-  'license-inventory',
-  version
-)
-await copyJsonIfPresent(
-  resolve(argValue('--sbom', resolve(root, 'runtime/staging/sbom.json'))),
-  resolve(outputDirectory, `deepshell-agent-v${version}-sbom.json`),
-  assets,
-  'sbom',
-  version
-)
-await copyJsonIfPresent(
-  resolve(argValue('--package-report', resolve(outputDirectory, 'package-report.json'))),
-  resolve(outputDirectory, `deepshell-agent-v${version}-package-report.json`),
-  assets,
-  'package-report',
-  version
-)
-await copyJsonIfPresent(
-  resolve(argValue('--security-audit', resolve(root, 'runtime/staging/security-audit.json'))),
-  resolve(outputDirectory, `deepshell-agent-v${version}-security-audit.json`),
-  assets,
-  'security-audit',
-  version
-)
 
-const presentAssets = assets.filter(asset => asset.status === 'present')
-const sums = presentAssets.map(asset => `${asset.sha256}  ${asset.asset}`).join('\n')
-await writeFile(resolve(outputDirectory, 'SHA256SUMS.txt'), sums.length === 0 ? '' : `${sums}\n`)
+export async function runReleaseStaging() {
+  const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
+  const version = argValue('--version', pkg.version)
+  const outputDirectory = resolve(argValue('--output-dir', resolve(root, 'runtime/staging', `release-v${version}`)))
+  for (const option of ['--dmg', '--windows-installer', '--license-inventory', '--sbom', '--package-report', '--security-audit']) {
+    assertExplicitInputOutsideOutput(option, outputDirectory)
+  }
+  await assertOutputDirectoryMayBeReplaced(version, outputDirectory)
+  await mkdir(dirname(outputDirectory), { recursive: true })
+  let stagingDirectory = await mkdtemp(resolve(dirname(outputDirectory), `.${basename(outputDirectory)}-tmp-`))
+  try {
+    await writeReleaseStaging(version, outputDirectory, stagingDirectory)
+    await replaceDirectory(stagingDirectory, outputDirectory)
+    stagingDirectory = null
+  } finally {
+    if (stagingDirectory) await rm(stagingDirectory, { recursive: true, force: true })
+  }
 
-const notes = [
-  `# DeepShell Agent v${version} Developer Preview`,
-  '',
-  'This draft is generated locally by `pnpm release:stage`.',
-  '',
-  '## Distribution status',
-  '',
-  '- macOS arm64: developer preview packaging lane.',
-  '- Code signing: ad-hoc/local signing only.',
-  '- Apple notarization: not performed.',
-  windowsNotesLine(version),
-  '',
-  '## Assets',
-  '',
-  ...assets.map(asset => `- ${asset.asset}: ${asset.status}`),
-  ''
-]
-await writeFile(resolve(outputDirectory, 'RELEASE_NOTES.md'), notes.join('\n'))
-await writeFile(resolve(outputDirectory, 'release-manifest.json'), redactedJson({
-  schemaVersion: 1,
-  application: { name: 'DeepShell Agent', version },
-  generatedAt: new Date().toISOString(),
-  assets,
-  publishPolicy: 'local staging only; GitHub release creation and asset upload require explicit user authorization',
-  // Windows 验收事实由 `lib/windows-acceptance.mjs` **按版本**提供，notes 与 manifest 共用同一份渲染，
-  // 因此两处不可能出现"版本与验收结论不一致"。未登记的版本会如实输出"无验收记录"。
-  ...windowsManifestFields(version)
-}))
+  console.log(`release staging written: ${outputDirectory}`)
+}
 
-console.log(`release staging written: ${outputDirectory}`)
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await runReleaseStaging()
+}

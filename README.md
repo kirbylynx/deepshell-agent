@@ -102,11 +102,11 @@ Target platform:
 
 Windows users should download the NSIS installer and install through the setup wizard.
 
-**`v0.1.3` completed end-to-end acceptance on real Windows x64 hardware** (setup wizard, first launch, data directory, credential setup, sessions and tools, single instance, dynamic ports, malicious-origin isolation, exit cleanup, crash recovery, diagnostics bundle, environment restoration). Acceptance found and fixed 8 Windows platform defects; see the [v0.1.3 closeout](docs/releases/v0.1.3.md).
+**`v0.1.3` completed end-to-end acceptance on real Windows x64 hardware** (setup wizard, first launch, data directory, credential setup, sessions and tools, single instance, dynamic ports, malicious-origin isolation, the exit-cleanup scenario tested at that time, crash recovery, diagnostics bundle, environment restoration). Acceptance found and fixed 8 Windows platform defects; see the [v0.1.3 closeout](docs/releases/v0.1.3.md).
 
 **Known limitations of the released `v0.1.3` baseline** (not to be read as current-branch passes):
 
-- **Uninstall does not clean up fully**: if the Sidecar becomes an orphan after an abnormal exit, the install directory retains 5 files / 108.54 MB, which require terminating that process and deleting them manually (not fixed in this version; Roadmap `REL-024`).
+- **Uninstall does not clean up fully**: later Windows measurements observed orphan Sidecar processes after both normal app close and abnormal app termination. When the orphan keeps native libraries mapped, the install directory can retain 5 files / 108.54 MB, which require terminating that process and deleting them manually. This was not fixed in `v0.1.3`; the active `v0.1.4` branch tracks the fix as Roadmap `REL-024` and still needs Windows uninstall re-validation.
 - **Per-platform runtime trimming was not implemented in `v0.1.3`**: its installer bundles both the macOS and Windows Node runtimes, and the macOS half (4800 files / 187.5 MB) is entirely unused on Windows. The active `v0.1.4` branch has implemented and rebuilt the macOS path; Windows packaging and on-device verification remain pending (Roadmap `REL-022`).
 - Two WebView2 matrix dimensions were not measured this round: font/CJK rendering, and the file picker / drag-and-drop / clipboard.
 - Dependency vulnerability audit is unavailable on this machine (the configured npm mirror has no audit endpoint), so **dependencies have not passed a vulnerability scan**.
