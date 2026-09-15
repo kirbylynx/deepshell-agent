@@ -6,9 +6,9 @@
 >
 > **Tagline:** A desktop agent powered by DeepSeek Harness.
 >
-> **状态：** 功能池、优先级、实现状态与发布规划基线；`v0.0.1` POC 已完成可行性验证，`v0.1.0` MVP 已落地项已标注，选定的 `v0.1.1` 发布硬化项已落地，选定的 `v0.1.2` DSH runtime refresh 项已落地到当前源码基线，选定的 `v0.1.3` Windows x64 平台验收项已进入当前规划分支
+> **状态：** 功能池、优先级、实现状态与发布规划基线；`v0.0.1` POC 至 `v0.1.3` Windows x64 平台验收均已收口，`DESK-023`、`REL-022`、`REL-023`、`REL-024` 与 `QA-011` 已选入当前 `v0.1.4` 打包效率分支
 >
-> **日期：** 2026-09-10
+> **日期：** 2026-09-15
 
 ## 1. 文档目的
 
@@ -21,6 +21,7 @@
 - [`docs/releases/v0.1.0.zh.md`](releases/v0.1.0.zh.md)
 - [`docs/releases/v0.1.1.zh.md`](releases/v0.1.1.zh.md)
 - [`docs/releases/v0.1.2.zh.md`](releases/v0.1.2.zh.md)
+- [`docs/releases/v0.1.3.zh.md`](releases/v0.1.3.zh.md)
 
 说明：`docs/plans/` 是本地过程文档目录，用于需求推演、设计草案、实施计划和验收证据整理，默认不随公开源码仓库发布。公开仓库中的 Roadmap 只记录功能池、优先级和实现状态。
 
@@ -60,9 +61,11 @@
 - `已实现（v0.1.0）` 表示该功能已在 `v0.1.0` MVP 中落地并纳入当前验证基线。
 - `已实现（v0.1.1）` 表示该功能已在 `v0.1.1` 发布硬化基线中落地，并纳入当前验证范围。
 - `已实现（v0.1.2）` 表示该功能已在 `v0.1.2` DSH runtime refresh 基线中落地，并纳入当前验证范围。
+- `已实现（v0.1.3）` 表示该功能已在 `v0.1.3` Windows x64 平台验收基线中落地，并纳入当前验证范围。
 - `待实现（v0.1.1）` 表示该功能已进入当前 `v0.1.1` 规划/开发分支，但尚未作为已实现功能落地。
 - `待实现（v0.1.2）` 表示该功能已进入当前 `v0.1.2` DSH runtime refresh 分支，但尚未作为已实现功能落地。
 - `待实现（v0.1.3）` 表示该功能已进入当前 `v0.1.3` Windows x64 平台验收分支，但尚未作为已实现功能落地。
+- `待实现（v0.1.4）` 表示该功能已进入当前 `v0.1.4` 打包效率分支，但尚未作为已实现功能落地。
 - `未开始` 表示该 Roadmap 功能项尚未作为完整功能落地；如果某个组合项只完成了一部分，也仍按未完整实现处理。
 - `待实现` 不是实现声明，也不替代需求、设计、实施计划或版本收口文档。
 
@@ -78,12 +81,12 @@
 | DESK-004 | Bundled Node.js | 最终用户无须安装 Node/npm/pnpm | P0 | 已实现（v0.1.0） |
 | DESK-005 | Full Pinned DSH | 随应用分发精确锁定的官方 DSH npm 版本 | P0 | 已实现（v0.1.0） |
 | DESK-006 | Sidecar 启动握手 | 管理 PID、动态端口、nonce、ready 与启动超时 | P0 | 已实现（v0.1.0） |
-| DESK-007 | Sidecar 健康检查 | 区分 starting、ready 和 crashed（⚠️ 原描述含 degraded，但 0.1.3 读码确认 RuntimePhase 仅有 Starting/Ready/Recovering/StartupFailed/RuntimeFailed —— **degraded 在实现中不存在**） | P0 | 已实现（v0.1.0） |
+| DESK-007 | Sidecar 健康检查 | 区分 starting、ready 和 crashed（⚠️ 原描述含 degraded，但 `v0.1.3` 读码确认 RuntimePhase 仅有 Starting/Ready/Recovering/StartupFailed/RuntimeFailed —— **degraded 在实现中不存在**） | P0 | 已实现（v0.1.0） |
 | DESK-008 | Sidecar 优雅退出 | 落盘后退出，并在超时后清理进程树 | P0 | 已实现（v0.1.0） |
 | DESK-009 | Sidecar 崩溃恢复 | 有限自动重启、interrupted 状态和手动恢复入口 | P0 | 已实现（v0.1.0） |
 | DESK-010 | 独立 DSH_HOME | 不污染或复用用户已有 DSH CLI 环境 | P0 | 已实现（v0.1.0） |
 | DESK-011 | 动态回环端口 | 仅绑定 loopback，避免固定端口冲突 | P0 | 已实现（v0.1.0） |
-| DESK-012 | 基础菜单 | About、Quit 和版本信息 | P0 | 部分实现（macOS 符合 HIG；**Windows 不可用见 DESK-023**） |
+| DESK-012 | 基础菜单 | About、Quit 和版本信息 | P0 | 部分实现（macOS 符合 HIG；Windows 补全已排入 `v0.1.4`，见 DESK-023） |
 | DESK-013 | 外部链接处理 | 在系统浏览器打开非本地链接 | P0 | 已实现（v0.1.0） |
 | DESK-014 | Tray | 托盘状态与常用操作 | P2 | 未开始 |
 | DESK-015 | Native Menu 与快捷键 | 提供完整桌面菜单和全局/应用快捷键 | P2 | 未开始 |
@@ -94,7 +97,7 @@
 | DESK-020 | Reveal in Folder | 从应用定位到系统文件管理器 | P2 | 未开始 |
 | DESK-021 | 原生 File/Directory Picker | 在官方 Picker 不足时提供最小 Tauri 桥接 | P2 | 未开始 |
 | DESK-022 | 多窗口 | 支持独立 Session、设置或辅助窗口 | P3 | 未开始 |
-| DESK-023 | 按平台差异化顶部菜单 | **Windows 与 macOS 需要各自合适的顶部菜单**，而不是共用一套 macOS 风格的应用程序菜单。`v0.1.3` Windows 真机实测暴露两个问题：① **菜单文本与窗口标题重复**——窗口标题为 `DeepShell Agent`（`lib.rs` L129），菜单名**也是同一个字符串**（`lib.rs` L87），Windows 上标题栏下方紧接着又是一个 `DeepShell Agent`，用户难以区分哪个是标题、哪个是菜单；② **菜单内容不符合 Windows 惯例**——当前菜单项为 `about / separator / services / separator / hide / hide_others / separator / quit`（`lib.rs` L85-99），这一整套是 **macOS 的"应用程序菜单"规范**（`services`/`hide`/`hide_others` 在 Windows 上无对应概念），而这些项在 **macOS 上之所以合理，是因为菜单位于屏幕顶部菜单栏（不在窗口内），且 Apple HIG 本就要求应用菜单以应用名命名**——同一套配置放到 Windows 就表现为"窗口里重复出现应用名 + 一堆无效菜单项"。**根因**：菜单构建代码**完全没有平台分支**（全量搜索 `src-tauri/src/**.rs` 的 `#[cfg(target_os)]`/`#[cfg(windows)]`，**没有一处针对菜单**）。修复范围：按平台分别构建菜单——macOS 保留应用菜单（应用名 + about/services/hide/quit）；Windows 改为本地惯例的窗口菜单栏（如 `文件`/`编辑`/`视图`/`帮助`，About 与版本信息归入"帮助"），并确保菜单名**不与窗口标题重复** | P2 | 未开始 |
+| DESK-023 | 按平台差异化顶部菜单 | **Windows 与 macOS 需要各自合适的顶部菜单**，而不是共用一套 macOS 风格的应用程序菜单。`v0.1.3` Windows 真机实测暴露两个问题：① **菜单文本与窗口标题重复**——窗口标题为 `DeepShell Agent`（`lib.rs` L129），菜单名**也是同一个字符串**（`lib.rs` L87），Windows 上标题栏下方紧接着又是一个 `DeepShell Agent`，用户难以区分哪个是标题、哪个是菜单；② **菜单内容不符合 Windows 惯例**——当前菜单项为 `about / separator / services / separator / hide / hide_others / separator / quit`（`lib.rs` L85-99），这一整套是 **macOS 的"应用程序菜单"规范**（`services`/`hide`/`hide_others` 在 Windows 上无对应概念），而这些项在 **macOS 上之所以合理，是因为菜单位于屏幕顶部菜单栏（不在窗口内），且 Apple HIG 本就要求应用菜单以应用名命名**——同一套配置放到 Windows 就表现为"窗口里重复出现应用名 + 一堆无效菜单项"。**根因**：菜单构建代码**完全没有平台分支**（全量搜索 `src-tauri/src/**.rs` 的 `#[cfg(target_os)]`/`#[cfg(windows)]`，**没有一处针对菜单**）。已确认的 `v0.1.4` 范围：macOS 保留应用菜单；Windows 使用最小原生结构 `File > Exit` 与 `Help > About DeepShell Agent`；不添加空的 `Edit`/`View` 菜单，不拆分或 fork 官方 DSH Web UI；两个平台必须分别构建并目视验收各自的原生菜单 | P2 | 待实现（v0.1.4） |
 
 ### 4.2 官方 Web UI 与产品界面
 
@@ -354,9 +357,9 @@
 | REL-019 | DSH runtime refresh to 0.1.5 | 原子升级 pinned DSH runtime、lockfile、profile、First-party Bundle 兼容、release artifacts 和公开文档到上游 DSH 0.1.5 兼容集 | P0 | 已实现（v0.1.2） |
 | REL-020 | Windows x64 构建环境验收 | 在 Windows x64 真机上实测并记录构建主机前置条件：MSVC C++ 工具集与 Windows SDK 完整性、`rc.exe` 可用性、WebView2 Runtime、PowerShell 解析路径、NSIS 工具链获取方式，以及 `pnpm release:windows:check` 的 preflight 结果 | P1 | 已实现（v0.1.3）：六项前置条件全部实测记录 |
 | REL-021 | Windows x64 产物清单与安全边界验收能力 | 使 Windows 侧能产出等价结构的产物清单并执行安全边界比较，覆盖测试资源与 E2E 标记检查；改造须保留 macOS 侧既有能力 | P1 | 已实现（v0.1.3）：清单产出与安全边界比较均在 Windows 实跑通过 |
-| REL-022 | 按平台裁剪运行时打包 | 各平台安装包只打包**自己实际需要**的 Node 运行时，而不是把每个平台的运行时都塞进每个安装包。`v0.1.3` Windows NSIS 安装包实测：安装后 32226 个文件 / 512 MB，其中 `runtime/node/darwin-arm64` 占 4800 个文件 / 187.5 MB，而 Windows 永不使用它；macOS `.app` 存在对称的 `win32-x64` 浪费。修复需在 `tauri.conf.json` 中按平台条件化 `bundle.resources` 映射，**并同步修改** `verify-package.mjs` 中"同一产物内必须同时存在两平台运行时"的必需项断言。**不得**通过移除官方 DSH 核心运行时能力来达成 | P1 | 未开始 |
-| REL-023 | Windows x64 免安装 ZIP 版 | 在 NSIS 安装包之外**再产出一个 Windows x64 免安装 ZIP**（解压即用、无需安装），面向试用评估、受限机器、以及无法运行安装程序的用户。需先决策并记录：(1) 便携运行的数据存放位置——沿用安装版的 `%APPDATA%\com.deepshell.agent`，还是改为随便携目录走的独立路径（`paths.rs` 目前一切都由 Tauri 的 `app_data_dir()` 推导）；(2) 因没有卸载程序，需明确清理指引；(3) 如何避免写注册表（当前卸载项仅由 NSIS 安装器写入）与创建快捷方式；(4) 是否允许与已安装副本共存而不发生 Session/凭据冲突。必须复用既有的 release-staging 多产物暂存与产物清单检查，**不得**另造一套清单 | P1 | 未开始 |
-| REL-024 | 卸载前终止遗留 Sidecar | 卸载程序必须**先检测并终止遗留的 Sidecar 进程**再删除文件，使卸载无需人工介入即可完成。Windows 真机实测（`v0.1.3`，含**因果验证**）：应用进程退出后，其 Sidecar（`runtime\node\win32-x64\node.exe`）成为孤儿进程继续存活，并**内存映射**着若干原生库，导致 NSIS 卸载程序删不掉它们——残留 5 个文件 / 108.54 MB（`node.exe` 93.4 MB、`sharp` 的 `libvips-42.dll` 18.6 MB 与 `libvips-cpp-8.18.6.dll`、`sharp-win32-x64-0.35.4.node`、`koffi` 的 `koffi.node`），**每一个都恰好是该孤儿进程加载过的库**。**因果验证方法**：受控构造孤儿（正常启动应用后只强杀应用进程、不加 `/T`）→ 执行静默卸载 → 逐个以独占方式打开残留文件（5/5 失败）→ `taskkill` 终止孤儿 → **同样这 5 个文件立即 5/5 全部可删**，目录树随之清空。因此这不是相关性而是**完整因果链**。⚠️ **严重性**：孤儿**不止出现在异常路径**——用户**正常关闭应用**后也曾观测到残留侧车，故属**常规使用路径**问题。孤儿还会占用仓库 `runtime/`，使 `pnpm check` 报 `os error 32`。待决策范围：用 NSIS 自定义卸载钩子调用既有的 ownership-registry 清理、按安装路径匹配进程的兜底方案，以及**先修正常退出路径**（`RunEvent::ExitRequested` → `stop_runtime()` 是否真正终止了侧车进程树） | P1 | 未开始 |
+| REL-022 | 按平台裁剪运行时打包 | 各平台安装包只打包**自己实际需要**的 Node 运行时，而不是把每个平台的运行时都塞进每个安装包。`v0.1.3` Windows NSIS 安装包实测：安装后 32226 个文件 / 512 MB，其中 `runtime/node/darwin-arm64` 占 4800 个文件 / 187.5 MB，而 Windows 永不使用它；macOS `.app` 存在对称的 `win32-x64` 浪费。修复需在 `tauri.conf.json` 中按平台条件化 `bundle.resources` 映射，**并同步修改** `verify-package.mjs` 中"同一产物内必须同时存在两平台运行时"的必需项断言。**不得**通过移除官方 DSH 核心运行时能力来达成 | P1 | 待实现（v0.1.4） |
+| REL-023 | Windows x64 免安装 ZIP 版 | 在 NSIS 安装包之外**再产出一个 Windows x64 免安装 ZIP**（解压即用、无需安装），面向试用评估、受限机器以及无法运行安装程序的用户。已确认的 `v0.1.4` 范围：便携版与安装版共用 `%APPDATA%\com.deepshell.agent` 数据目录，保持现有 `credentials-local` 与 Permission/Approval 语义，不创建 DeepShell 卸载注册项、桌面快捷方式或开始菜单快捷方式，支持同版本安装版/ZIP 同时存在于磁盘并通过既有单实例锁交替使用，不支持两个独立实例并发运行，并依赖系统已有 Evergreen WebView2 Runtime，不在 ZIP 内捆绑 bootstrapper、offline installer 或 fixed runtime。必须复用既有的 release-staging 多产物暂存与产物清单检查，**不得**另造一套清单 | P1 | 待实现（v0.1.4） |
+| REL-024 | 卸载前终止遗留 Sidecar | 卸载程序必须**先检测并终止遗留的 Sidecar 进程**再删除文件，使卸载无需人工介入即可完成。Windows 真机实测（`v0.1.3`，含**因果验证**）：应用进程退出后，其 Sidecar（`runtime\node\win32-x64\node.exe`）成为孤儿进程继续存活，并**内存映射**着若干原生库，导致 NSIS 卸载程序删不掉它们——残留 5 个文件 / 108.54 MB（`node.exe` 93.4 MB、`sharp` 的 `libvips-42.dll` 18.6 MB 与 `libvips-cpp-8.18.6.dll`、`sharp-win32-x64-0.35.4.node`、`koffi` 的 `koffi.node`），**每一个都恰好是该孤儿进程加载过的库**。**因果验证方法**：受控构造孤儿（正常启动应用后只强杀应用进程、不加 `/T`）→ 执行静默卸载 → 逐个以独占方式打开残留文件（5/5 失败）→ `taskkill` 终止孤儿 → **同样这 5 个文件立即 5/5 全部可删**，目录树随之清空。因此这不是相关性而是**完整因果链**。⚠️ **严重性**：孤儿**不止出现在异常路径**——用户**正常关闭应用**后也曾观测到残留侧车，故属**常规使用路径**问题。孤儿还会占用仓库 `runtime/`，使 `pnpm check` 报 `os error 32`。已确认的 `v0.1.4` 范围：先修正常退出清理路径，再增加 NSIS `PREUNINSTALL` hook 调用既有 ownership-registry 清理；若 ownership record 缺失，fallback 只能检查构建时 allowlist 中位于规范化当前安装根目录下的绝对规范化 executable path，禁止按进程名终止，且所有权或路径身份不确定时必须失败关闭。验收必须在真实遗留 Sidecar 存在时执行实际卸载，并覆盖伪造 record、缺失 record、另一目录 record 和超时故障注入 | P1 | 待实现（v0.1.4） |
 | REL-025 | 已隔离的 ownership 记录不得永久阻断启动 | `recover_registered` 必须能够**回收陈旧的隔离记录**，而不是让此后每一次启动都失败。Windows 真机实测（`v0.1.3`）：`runtime-state/ownership.json` 一旦处于 `state:"quarantined"`，应用**每次启动都直接失败**（`runtime_stop_failed`）且无自愈路径——该状态只被**写入**（`quarantine_registered` 与"executable 不匹配"分支），从未被**回收**：`ensure_active` 对 `quarantined` 一律返回 `Err`，而 `recover_registered` 只对 `expected_executable` **匹配**的记录做核验。代码注释宣称的"下次启动重新核验后清理"**从未实现**。`v0.1.3` 已在 Windows 侧修复"登记进程**已死**"这一情形；**macOS 的 `process_tree.rs` 存在同源缺陷，本次刻意未改**——在无 macOS 真机的情况下改动该分支属未验证改动。剩余范围：在真实 macOS 上验证并移植该修复；并决定"登记进程存活但属外来进程"（当前为硬阻断，需人工删除该文件或终止该进程）是否维持硬阻断 | P1 | 部分修复（Windows，v0.1.3）；macOS 未开始 |
 | REL-026 | 修复文件拖放被 Tauri 层静默吞掉 | 官方 DSH Web UI 实现了 HTML5 文件拖放并会画出拖放提示，但**在 DeepShell 中拖放无任何反应**。Windows 真机实测（`v0.1.3`）：用户拖入文件后"显示可以拖，但拖进去没有反应"。根因已定位：`tauri.conf.json` 的窗口配置未设置 `dragDropEnabled`，而 Tauri 2 的该选项**默认 `true`**，其语义是**阻止 HTML5 原生拖放**并改为向应用发出 `DragDrop` 事件；而 `src-tauri/src/**.rs` 中**完全没有处理** `DragDrop`/`on_drop`/`DragDropEvent`（全量搜索零命中），于是事件无人接收、拖放被静默丢弃。**非 Windows 特有**——`dragDropEnabled` 是跨平台配置，macOS 上应存在同样缺陷。修复方向（须先在真实 WebView2 上实跑验证，不得仅凭配置推断）：① 设 `dragDropEnabled: false` 让 WebView 自行处理 HTML5 拖放（改动最小）；② 或保留 `true` 并在 Rust 侧实现 `DragDrop` 事件转发（改动较大，且需与官方 UI 的既有事件契约对接，存在触碰"不得依赖私有前端接口"约束的风险） | P1 | 未开始 |
 | REL-027 | 客户端渲染进程死亡后必须可检测、可恢复 | 应用对**侧车**健康有完整监控（进程存活、`ownership.json`、崩溃检测、自动重启、60 秒重启预算），但对**自己的客户端渲染进程**没有任何监控。Windows 真机实测（`v0.1.3`）：`taskkill` 杀掉 WebView2 进程树后，应用进程**仍在**、窗口句柄**仍在**、侧车**完全健康**（端口正常、登记 `active`），但**客户端从未重建**（60 秒内进程数恒为 0，90 秒后仍为 0），应用日志**无任何新事件**——既不报客户端异常，也不尝试恢复。用户看到的是"**窗口还在，但是内容是纯黑屏，什么都没有**"，且**无任何提示**，唯一出路是强制结束进程再重开。读码确认：全量搜索 `RenderProcess`/`ProcessFailed`/`reload`/`Recreate` 等**零命中**，应用只有侧车的 `runtime_crashed` 路径。属**真实可达**场景（Windows 上渲染进程因 GPU 崩溃、内存压力、驱动问题而死并不罕见），且**非 Windows 特有**（Tauri 跨平台，WKWebView 内容进程同样可被杀）。架构对标：§10.2 把 `Desktop ready` 列为六个故障域之一并禁止用单一在线/离线覆盖；本场景是"**Desktop 不 ready 但无人知晓**"。修复范围：检测渲染进程退出（Tauri 侧可用 Windows 的进程/窗口事件，或对 webview 侧加心跳）、失败时重载或重建 webview、并向用户如实提示 | P1 | 未开始 |
@@ -375,7 +378,7 @@
 | QA-008 | DSH Upgrade Regression | 每次上游升级执行固定回归清单 | P1 | 已实现（v0.1.2） |
 | QA-009 | Document Parser Tests | 格式、来源、资源限制和恶意文件 | P1 | 未开始 |
 | QA-010 | MCP Failure Isolation | Server 崩溃、超时和协议错误 | P1 | 未开始 |
-| QA-011 | Performance Regression | 启动、内存、体积和响应趋势 | P2 | 未开始 |
+| QA-011 | Performance Regression | 启动、内存、体积和响应趋势 | P2 | 待实现（v0.1.4）：仅覆盖包体积与文件数回归 |
 | QA-012 | Accessibility Tests | 键盘、焦点、状态和辅助技术 | P2 | 未开始 |
 
 ## 5. 架构约束，不作为功能排期
