@@ -1,8 +1,19 @@
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
 import { tmpdir } from 'node:os'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { deterministicInputDigest } from '../../scripts/lib/source-inputs.mjs'
+import { promisify } from 'node:util'
+import { fileURLToPath } from 'node:url'
+import {
+  deterministicInputDigest,
+  gitRevisionInputDigest,
+  platformSourceInputs,
+  v013BaselineSourceInputs,
+} from '../../scripts/lib/source-inputs.mjs'
+
+const execFileAsync = promisify(execFile)
+const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 
 describe('构建输入指纹', () => {
   it('任意被纳入的生命周期源码变化都会使旧指纹失效', async () => {
@@ -38,6 +49,60 @@ describe('构建输入指纹', () => {
 
       expect(afterLockChange).not.toBe(before)
       expect(afterToolchainChange).not.toBe(afterLockChange)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('当前平台 digest 包含 tracked baseline，而冻结的 v0.1.3 输入排除它', () => {
+    const fixture = 'tests/fixtures/package-size-baselines/v0.1.3.json'
+    expect(platformSourceInputs['darwin-arm64']).toContain('tests')
+    expect(platformSourceInputs['win32-x64']).toContain('tests')
+    expect(v013BaselineSourceInputs).not.toContain(fixture)
+    expect(platformSourceInputs['darwin-arm64']).toContain('src-tauri/tauri.macos.conf.json')
+    expect(platformSourceInputs['win32-x64']).toContain('src-tauri/tauri.windows.conf.json')
+    expect(platformSourceInputs['darwin-arm64']).toContain('scripts/lib/package-manifest.mjs')
+    expect(platformSourceInputs['win32-x64']).toContain('scripts/lib/package-manifest.mjs')
+  })
+
+  it('冻结的 v0.1.3 Git blob 输入可重算并匹配 tracked fixture', async () => {
+    const fixture = JSON.parse(await readFile(resolve(workspace, 'tests/fixtures/package-size-baselines/v0.1.3.json'), 'utf8'))
+    const digest = await gitRevisionInputDigest(workspace, 'v0.1.3^{commit}', v013BaselineSourceInputs)
+    expect(digest).toBe(fixture.canonicalSource.baselineSourceInputSha256)
+  }, 15_000)
+
+  it('Git blob baseline digest 不受 working tree LF/CRLF 转换影响', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-git-inputs-'))
+    try {
+      await execFileAsync('git', ['init'], { cwd: temporary })
+      await execFileAsync('git', ['config', 'user.name', 'DeepShell Test'], { cwd: temporary })
+      await execFileAsync('git', ['config', 'user.email', 'test@deepshell.invalid'], { cwd: temporary })
+      await writeFile(resolve(temporary, 'input.txt'), 'first\nsecond\n')
+      await execFileAsync('git', ['add', 'input.txt'], { cwd: temporary })
+      await execFileAsync('git', ['commit', '-m', 'fixture'], { cwd: temporary })
+      const blobDigest = await gitRevisionInputDigest(temporary, 'HEAD', ['input.txt'])
+      const workingLf = await deterministicInputDigest(temporary, ['input.txt'])
+
+      await writeFile(resolve(temporary, 'input.txt'), 'first\r\nsecond\r\n')
+      const workingCrlf = await deterministicInputDigest(temporary, ['input.txt'])
+      const blobDigestAfter = await gitRevisionInputDigest(temporary, 'HEAD', ['input.txt'])
+
+      expect(workingCrlf).toBe(workingLf)
+      expect(blobDigestAfter).toBe(blobDigest)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('无 NUL 的非法 UTF-8 二进制差异不会被规范化吞掉', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-binary-inputs-'))
+    try {
+      const path = resolve(temporary, 'asset.bin')
+      await writeFile(path, Buffer.from([0xff, 0xfe, 13, 1]))
+      const before = await deterministicInputDigest(temporary, ['asset.bin'])
+      await writeFile(path, Buffer.from([0xff, 0xfd, 13, 1]))
+      const after = await deterministicInputDigest(temporary, ['asset.bin'])
+      expect(after).not.toBe(before)
     } finally {
       await rm(temporary, { recursive: true, force: true })
     }

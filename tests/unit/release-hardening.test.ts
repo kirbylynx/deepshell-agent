@@ -78,7 +78,9 @@ describe('v0.1.1 release hardening scripts', () => {
         '--runtime-node', node,
         '--runtime-dsh', dsh,
         '--profile-template', profile,
-        '--license-inventory', license
+        '--license-inventory', license,
+        '--package-manifest', 'none',
+        '--dmg-manifest', 'none'
       ])
 
       const reportText = await readFile(resolve(output, 'package-report.json'), 'utf8')

@@ -16,7 +16,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { root } from './lib/runtime.mjs'
-import { deterministicInputDigest } from './lib/source-inputs.mjs'
+import { platformInputDigest } from './lib/source-inputs.mjs'
 
 const execFileAsync = promisify(execFile)
 const digest = content => createHash('sha256').update(content).digest('hex')
@@ -59,15 +59,28 @@ if (e2e && release) {
   if (e2e.platform !== release.platform) {
     throw new Error(`E2E/Release 产物清单来自不同平台，拒绝比较：${e2e.platform} vs ${release.platform}`)
   }
+  if (e2e.schemaVersion !== 5 || release.schemaVersion !== 5) {
+    throw new Error('E2E/Release 产物清单必须使用 schemaVersion 5')
+  }
+  if (e2e.artifactKind !== 'macos-app' || release.artifactKind !== 'macos-app') {
+    throw new Error(`E2E/Release 安全边界只能比较同平台应用 tree：${e2e.artifactKind} vs ${release.artifactKind}`)
+  }
   const darwin = e2e.platform === 'darwin-arm64'
 
+  const configSources = darwin
+    ? ['src-tauri/tauri.conf.json', 'src-tauri/tauri.macos.conf.json']
+    : ['src-tauri/tauri.conf.json', 'src-tauri/tauri.windows.conf.json']
+  const configContents = await Promise.all(configSources.map(path => readFile(resolve(root, path))))
+  const configSha256 = digest(Buffer.concat(configContents.flatMap((content, index) => [Buffer.from(configSources[index]), Buffer.from([0]), content, Buffer.from([0])])))
+  const platformDigestField = darwin ? 'macosSourceInputSha256' : 'windowsSourceInputSha256'
+
   const commonInputs = {
-    configSha256: digest(await readFile(resolve(root, 'src-tauri/tauri.conf.json'))),
+    configSha256,
     capabilitySha256: digest(await readFile(resolve(root, 'src-tauri/capabilities/main.json'))),
     profileManifestSha256: digest(await readFile(resolve(root, 'runtime/profile-template/template-manifest.json'))),
     cargoTomlSha256: digest(await readFile(resolve(root, 'src-tauri/Cargo.toml'))),
     cargoLockSha256: digest(await readFile(resolve(root, 'src-tauri/Cargo.lock'))),
-    sourceInputSha256: await deterministicInputDigest(root),
+    [platformDigestField]: await platformInputDigest(root, e2e.platform),
   }
   const cargoMetadata = await execFileAsync('cargo', [
     'metadata', '--locked', '--no-deps', '--format-version', '1',
@@ -108,7 +121,8 @@ if (e2e && release) {
   const comparableFields = [
     'configSha256', 'capabilitySha256', 'profileManifestSha256',
     ...(darwin ? ['infoPlistSha256'] : []),
-    'cargoTomlSha256', 'cargoLockSha256', 'cargoMetadataSha256', 'sourceInputSha256',
+    'cargoTomlSha256', 'cargoLockSha256', 'cargoMetadataSha256', platformDigestField,
+    'binarySourceInputSha256',
     ...(darwin ? ['signing'] : []),
     'configSources'
   ]

@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 1,
+  "baselineVersion": "0.1.3",
+  "canonicalSource": {
+    "tag": "v0.1.3",
+    "peeledCommit": "34142a3e78f237b0c494551ffe4a8e309f3ab66a",
+    "baselineSourceInputSha256": "fbcd8ff948dd21a369ad296211bb885e9e0b96b3113b9157e671402c946dd51d"
+  },
+  "measurement": {
+    "algorithm": "deepshell-tree-v1",
+    "symlinks": "dereference-safe-files-within-trusted-subtree",
+    "emptyDirectories": "ignored",
+    "baselineInput": "git-blobs-v1"
+  },
+  "artifacts": {
+    "macosApp": {
+      "status": "canonical",
+      "bytes": 545566355,
+      "files": 32214,
+      "contentSha256": "309890f8c0b00e2fc9f685088980d49906f7e17688610a65128001a312fd56d4"
+    },
+    "macosDmg": {
+      "status": "canonical",
+      "bytes": 286527606,
+      "files": 1,
+      "sha256": "6f76d820b30aa9d1bdd8d47457f7e9127b6b473c3b35c7e69258a0abfed67026"
+    },
+    "windowsInstalledTree": {
+      "status": "pending"
+    },
+    "windowsNsis": {
+      "status": "reference-only",
+      "bytes": 84314666,
+      "files": 1,
+      "sha256": "3edb1a8cb52a48ffa92972bf767317e4ae814f92f261d6cab9204cb66cee4bd8",
+      "reason": "published asset exact-commit provenance not yet proven"
+    }
+  },
+  "sourceTrees": {
+    "darwinNode": {
+      "status": "canonical",
+      "bytes": 196611786,
+      "files": 4800,
+      "contentSha256": "6c011ae1d03bfb9ca5ec16b8ffbd59faae78dcc9e1b290c3f39dc60c19e29482"
+    },
+    "windowsNode": {
+      "status": "canonical",
+      "bytes": 106774079,
+      "files": 1994,
+      "contentSha256": "ab137e9fcd338e6dae838cf81d79f14f2ca8832c0c0a7f3e820170e5b8c937b8"
+    },
+    "dsh": {
+      "status": "canonical",
+      "bytes": 220981087,
+      "files": 25399,
+      "contentSha256": "840cfb39ea1ebc424c40facc917a52539fd6672ba2140c0727b54fad8568ead3"
+    },
+    "profileTemplate": {
+      "status": "canonical",
+      "bytes": 67274,
+      "files": 17,
+      "contentSha256": "e5017ee7160c40ae680d619c9d7aee9c4f34eedbd0234efd81da7c55ea8cd4ca"
+    }
+  },
+  "historicalNotes": {
+    "windowsInstalledTree": "approximately 512 MB and 32226 files; reference only, not a gate baseline"
+  }
+}

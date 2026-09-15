@@ -25,6 +25,14 @@ async function requireArtifacts() {
   for (const relative of adapter.requiredArtifacts) {
     await access(resolve(adapter.requiredArtifactsBase, relative))
   }
+  for (const relative of adapter.forbiddenArtifacts) {
+    try {
+      await access(resolve(adapter.requiredArtifactsBase, relative))
+      throw new Error(`产物包含禁止资源：${relative}`)
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error
+    }
+  }
   if (adapter.platform === 'win32') await requireArtifactReady(adapter, access)
   const artifact = await stat(adapter.artifactPath)
   if (artifact.isFile() && artifact.size === 0) throw new Error(`产物为空文件：${adapter.artifactPath}`)

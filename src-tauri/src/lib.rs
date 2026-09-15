@@ -21,6 +21,12 @@ static BUILD_PROFILE_MARKER: &str = "deepshell-build-profile:poc-e2e";
 #[cfg(not(feature = "poc-e2e"))]
 static BUILD_PROFILE_MARKER: &str = "deepshell-build-profile:release";
 
+#[used]
+static SOURCE_INPUT_MARKER: &str = concat!(
+    "deepshell-source-input:",
+    env!("DEEPSHELL_SOURCE_INPUT_SHA256")
+);
+
 #[tauri::command]
 fn runtime_status(state: State<'_, AppState>) -> sidecar::RuntimeSnapshot {
     state.snapshot()

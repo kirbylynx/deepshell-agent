@@ -115,34 +115,91 @@ function readBinaryStrings(path) {
   return readFileSync(path).toString('latin1')
 }
 
-function darwinAdapter(lock) {
+function macosDmgPath() {
+  const pkg = JSON.parse(readFileSync(resolve(root, 'package.json'), 'utf8'))
+  return resolve(root, 'src-tauri/target/release/bundle/dmg', `DeepShell Agent_${pkg.version}_aarch64.dmg`)
+}
+
+function darwinAdapter(lock, artifactKind = 'macos-app') {
+  if (!['macos-app', 'macos-dmg'].includes(artifactKind)) {
+    throw new Error(`darwin 不支持的产物类型：${artifactKind}`)
+  }
+  const appPath = resolve(root, MACOS_APP)
   return {
     platform: 'darwin',
     runtimePlatform: currentRuntimePlatform,
-    artifactKind: 'macos-app',
-    artifactPath: resolve(root, MACOS_APP),
+    artifactKind,
+    artifactPath: artifactKind === 'macos-dmg' ? macosDmgPath() : appPath,
+    primaryTreePath: appPath,
     // macOS 上「打包资源」与「可遍历资源树」是**同一个**目录（都在产物内部）。
     resourcesRoot: resolve(root, MACOS_APP, 'Contents/Resources'),
     intermediateRoot: resolve(root, MACOS_APP, 'Contents/Resources'),
     binaryPath: resolve(root, MACOS_APP, 'Contents/MacOS/deepshell-agent'),
-    // 与改造前 `scripts/verify-package.mjs` 的 `required` 数组逐字一致（M4 举证①要求 0 差异）：
-    // 5 条字面量 + 1 条由 `lock.dsh.entry` 拼出的 DSH 入口，共 6 条。
+    // v0.1.4 只要求当前平台 Node；另一平台 Node 由 forbiddenArtifacts 明确拒绝。
     requiredArtifacts: [
       'Contents/Info.plist',
       'Contents/MacOS/deepshell-agent',
       'Contents/Resources/runtime/node/darwin-arm64/bin/node',
-      'Contents/Resources/runtime/node/win32-x64/node.exe',
       `Contents/Resources/runtime/dsh/${lock.dsh.entry}`,
       'Contents/Resources/runtime/profile-template/template-manifest.json'
     ],
     requiredArtifactsBase: resolve(root, MACOS_APP),
+    forbiddenArtifacts: ['Contents/Resources/runtime/node/win32-x64'],
     signing: { status: 'signed-adhoc' },
     linkedLibraries: { status: 'available', tool: '/usr/bin/otool' },
     readBinaryStrings
   }
 }
 
-function windowsAdapter() {
+function windowsAdapter(lock, artifactKind = 'nsis-installer', options = {}) {
+  if (!['nsis-installer', 'windows-installed-tree', 'windows-portable'].includes(artifactKind)) {
+    throw new Error(`win32 不支持的产物类型：${artifactKind}`)
+  }
+  if (artifactKind === 'windows-installed-tree') {
+    if (!options.artifactPath) throw new Error('windows-installed-tree 要求显式 artifactPath')
+    const tree = resolve(options.artifactPath)
+    return {
+      platform: 'win32', runtimePlatform: currentRuntimePlatform,
+      artifactKind, artifactPath: tree, primaryTreePath: tree,
+      resourcesRoot: tree, intermediateRoot: tree,
+      binaryPath: resolve(tree, 'DeepShell Agent.exe'),
+      requiredArtifacts: [
+        'DeepShell Agent.exe',
+        'runtime/node/win32-x64/node.exe',
+        `runtime/dsh/${lock.dsh.entry}`,
+        'runtime/profile-template/template-manifest.json',
+      ],
+      requiredArtifactsBase: tree,
+      forbiddenArtifacts: ['runtime/node/darwin-arm64'],
+      signing: { status: 'unsigned' },
+      linkedLibraries: { status: 'unavailable', reason: 'otool is macOS-only' },
+      readBinaryStrings,
+    }
+  }
+  if (artifactKind === 'windows-portable') {
+    for (const field of ['stagingPath', 'archivePath', 'extractedPath']) {
+      if (!options[field]) throw new Error(`windows-portable 要求显式 ${field}`)
+    }
+    const stagingPath = resolve(options.stagingPath)
+    return {
+      platform: 'win32', runtimePlatform: currentRuntimePlatform,
+      artifactKind, artifactPath: resolve(options.archivePath), primaryTreePath: stagingPath,
+      stagingPath, extractedPath: resolve(options.extractedPath),
+      resourcesRoot: stagingPath, intermediateRoot: stagingPath,
+      binaryPath: resolve(stagingPath, 'DeepShell Agent.exe'),
+      requiredArtifacts: [
+        'DeepShell Agent.exe',
+        'runtime/node/win32-x64/node.exe',
+        `runtime/dsh/${lock.dsh.entry}`,
+        'runtime/profile-template/template-manifest.json',
+      ],
+      requiredArtifactsBase: stagingPath,
+      forbiddenArtifacts: ['runtime/node/darwin-arm64'],
+      signing: { status: 'unsigned' },
+      linkedLibraries: { status: 'unavailable', reason: 'otool is macOS-only' },
+      readBinaryStrings,
+    }
+  }
   return {
     platform: 'win32',
     runtimePlatform: currentRuntimePlatform,
@@ -158,6 +215,7 @@ function windowsAdapter() {
     // 产物检查负责；此处只声明相对主二进制的清单，避免同一事实有两处来源。
     requiredArtifacts: [],
     requiredArtifactsBase: null,
+    forbiddenArtifacts: [],
     // REL-008 未做代码签名 → 如实标注 unsigned，而不是静默跳过（设计 §4.5）。
     signing: { status: 'unsigned' },
     // `otool -L` 结构性不可得（设计 §4.5）→ 显式 unavailable + 原因，而非空数组。
@@ -168,9 +226,9 @@ function windowsAdapter() {
 
 // `lock` 仅 darwin 分支需要（用于拼出 DSH 入口路径）。传入而非在模块内 `await readLock()`，
 // 是为了保持本函数同步（硬约束 1）。
-export function packageAdapter(platform = process.platform, lock) {
-  if (platform === 'darwin') return darwinAdapter(lock)
-  if (platform === 'win32') return windowsAdapter()
+export function packageAdapter(platform = process.platform, lock, artifactKind, options) {
+  if (platform === 'darwin') return darwinAdapter(lock, artifactKind)
+  if (platform === 'win32') return windowsAdapter(lock, artifactKind, options)
   throw new Error(`暂不支持的打包平台：${platform}`)
 }
 
