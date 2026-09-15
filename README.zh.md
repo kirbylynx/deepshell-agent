@@ -31,7 +31,7 @@ DeepShell Agent 不重新实现 Agent Runtime，也不 fork 官方 DSH Web UI。
 - Sidecar 动态端口、token 清理、Ready Gate、进程清理和基础恢复；
 - `v0.1.1` 到 `v0.1.2` runtime refresh 期间，对 `dsh-home/sessions` 做有限本地升级前备份；
 - 本地脱敏诊断包、包体积报告、SBOM 基线、漏洞扫描入口和 release staging 自动化；
-- E2E/Release 产物安全边界比较。
+- macOS E2E/Release 产物安全边界比较。
 
 仍需在正式签名/公证二进制公开分发前完成：
 
@@ -318,9 +318,9 @@ pnpm package:mvp
 
 说明：
 
-- Windows 上的 `pnpm package:mvp` 会调用 Tauri 构建 NSIS installer，并顺带产出产物清单（`runtime/staging/package-release.json`，`schemaVersion: 5`）与执行 E2E/Release 安全边界比较。
+- Windows 上的 `pnpm package:mvp` 会调用 Tauri 构建 NSIS installer，产出 release NSIS 产物清单（`runtime/staging/package-release-win32-x64-nsis-installer.json`，`schemaVersion: 5`），并执行 Windows release manifest 的静态安全边界检查。它不会在 Windows 上执行仅属于 macOS 路线的 E2E/Release 产物比较。
 - NSIS 工具链**由 Tauri 自动下载**到 `%LOCALAPPDATA%\tauri\NSIS\`，无需单独安装，也无需配置系统 `PATH`；同目录还会缓存 WebView2 引导程序。
-- `v0.1.3` 已在真实 Windows x64 真机上完成该流水线的端到端实跑（编译 → makensis → 清单捕获 → 边界比较，exit 0），产物 80.41 MB。
+- `v0.1.3` 已在真实 Windows x64 真机上完成 Windows installer 流水线的端到端实跑（编译 → makensis → 清单捕获 → 静态边界检查，exit 0），产物 80.41 MB。
 - 当前源码基线不包含 Windows code signing；正式二进制分发前需要单独完成。
 - 依赖漏洞审计需要可用的 npm audit 端点；若镜像不提供，`pnpm security-audit` 会**如实报错**而不会报告"通过"。
 
@@ -352,9 +352,9 @@ pnpm security:audit
 - `pnpm profile:verify` 校验 DeepShell Bundle/Profile/Preset 与官方 DSH 基线的关系；
 - `pnpm package:e2e` 构建 E2E 专用应用包并捕获产物清单；
 - `pnpm package:mvp` 是平台感知打包脚本：
-  - macOS：构建 `.app`、签名、校验并生成 `.dmg`；
-  - Windows：在 Windows 构建环境中构建 NSIS installer；
-- `pnpm package:verified` 会重建 E2E 和 Release 产物，并执行安全边界比较。
+  - macOS：构建 `.app`、签名、校验并生成 `.dmg`，捕获 release manifest，并要求 E2E/Release 产物比较通过；
+  - Windows：在 Windows 构建环境中构建 NSIS installer，捕获 release NSIS manifest，并执行静态安全边界检查；
+- `pnpm package:verified` 会在 macOS release 路线上重建 E2E 和 Release 产物，并执行安全边界比较。
 - `pnpm licenses:collect`、`pnpm sbom:generate`、`pnpm package:report` 和 `pnpm release:stage` 用于准备本地 release 支持资产，不会执行发布；
 - `pnpm diagnostics:collect` 会在 ignored staging 下导出本地脱敏诊断包；
 - `pnpm release:windows:check` 输出 Windows x64 打包路线；在 macOS 上运行时不能被当作 Windows installer 验收通过；

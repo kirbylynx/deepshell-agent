@@ -699,4 +699,60 @@ describe('v0.1.1 release hardening scripts', () => {
     expect(windows.commands).toContain('pnpm security:audit')
     expect(windows.commands.indexOf('pnpm security:audit')).toBeLessThan(windows.commands.indexOf('pnpm release:stage'))
   })
+
+  it('Windows release workflow 在构建前固定获取并断言 canonical v0.1.3 tag', async () => {
+    const workflow = await readFile(resolve(root, '.github/workflows/windows-release.yml'), 'utf8')
+    const canonicalCommit = 'ca4add9dc52c5053278570abb28e1d21ae5a0239'
+    const checkoutIndex = workflow.indexOf('uses: actions/checkout@v4')
+    const tagVerifyIndex = workflow.indexOf('name: Verify canonical v0.1.3 baseline tag')
+    const packageIndex = workflow.indexOf('name: Package NSIS installer')
+
+    expect(checkoutIndex).toBeGreaterThan(-1)
+    expect(tagVerifyIndex).toBeGreaterThan(checkoutIndex)
+    expect(packageIndex).toBeGreaterThan(tagVerifyIndex)
+    expect(workflow).toMatch(/fetch-depth:\s*0/)
+    expect(workflow).toMatch(/fetch-tags:\s*true/)
+    expect(workflow).toContain("git ls-remote --tags origin 'refs/tags/v0.1.3^{}'")
+    expect(workflow).toContain("'+refs/tags/v0.1.3:refs/tags/v0.1.3'")
+    expect(workflow).toContain("git rev-parse 'v0.1.3^{commit}'")
+    expect(workflow).toContain('$remotePeeled =')
+    expect(workflow).toContain('$actual =')
+    expect(workflow).toContain('.Trim()')
+    expect(workflow).toContain('$LASTEXITCODE')
+    expect(workflow).toContain(canonicalCommit)
+  })
+
+  it('README 双语准确描述 Windows package:mvp 当前边界', async () => {
+    const [english, chinese, packageScript] = await Promise.all([
+      readFile(resolve(root, 'README.md'), 'utf8'),
+      readFile(resolve(root, 'README.zh.md'), 'utf8'),
+      readFile(resolve(root, 'scripts/package-mvp.mjs'), 'utf8'),
+    ])
+
+    const windowsPackageBranch = packageScript.slice(
+      packageScript.indexOf("} else if (process.platform === 'win32') {"),
+      packageScript.indexOf('} else {'),
+    )
+    expect(windowsPackageBranch).toContain("['scripts/capture-package-manifest.mjs', 'release', 'nsis-installer']")
+    expect(windowsPackageBranch).toContain("['scripts/compare-e2e-release.mjs']")
+    expect(windowsPackageBranch).not.toMatch(/\['scripts\/compare-e2e-release\.mjs',\s*'--require-artifacts'\]/)
+
+    const englishWindowsSection = english.slice(
+      english.indexOf('### Windows x64 build'),
+      english.indexOf('### Common development commands'),
+    )
+    const chineseWindowsSection = chinese.slice(
+      chinese.indexOf('### Windows x64 构建'),
+      chinese.indexOf('### 常用开发命令'),
+    )
+
+    expect(englishWindowsSection).toContain('release NSIS package manifest')
+    expect(englishWindowsSection).toContain('static security-boundary checks')
+    expect(englishWindowsSection).toContain('does not run the macOS-only E2E/Release artifact comparison on Windows')
+    expect(englishWindowsSection).not.toContain('runs the E2E/Release security-boundary comparison')
+    expect(chineseWindowsSection).toContain('release NSIS 产物清单')
+    expect(chineseWindowsSection).toContain('静态安全边界检查')
+    expect(chineseWindowsSection).toContain('不会在 Windows 上执行仅属于 macOS 路线的 E2E/Release 产物比较')
+    expect(chineseWindowsSection).not.toContain('执行 E2E/Release 安全边界比较')
+  })
 })

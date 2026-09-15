@@ -31,7 +31,7 @@ Capabilities already included in the source baseline:
 - Sidecar dynamic port, token cleanup, Ready Gate, process cleanup, and basic recovery;
 - bounded local pre-upgrade backup of `dsh-home/sessions` during the `v0.1.1` to `v0.1.2` runtime refresh;
 - redacted local diagnostics, package-size reporting, SBOM baseline, vulnerability-audit entrypoint, and release staging automation;
-- E2E/Release artifact security-boundary comparison.
+- macOS E2E/Release artifact security-boundary comparison.
 
 Still required before formal signed/notarized public binary distribution:
 
@@ -318,9 +318,9 @@ pnpm package:mvp
 
 Notes:
 
-- On Windows, `pnpm package:mvp` calls Tauri to build the NSIS installer, and additionally emits the package manifest (`runtime/staging/package-release.json`, `schemaVersion: 5`) and runs the E2E/Release security-boundary comparison.
+- On Windows, `pnpm package:mvp` calls Tauri to build the NSIS installer, emits the release NSIS package manifest (`runtime/staging/package-release-win32-x64-nsis-installer.json`, `schemaVersion: 5`), and runs static security-boundary checks for the Windows release manifest. It does not run the macOS-only E2E/Release artifact comparison on Windows.
 - The NSIS toolchain is **downloaded automatically by Tauri** into `%LOCALAPPDATA%\tauri\NSIS\`; it needs no separate install and no system `PATH` change. The WebView2 bootstrapper is cached in the same directory.
-- `v0.1.3` ran that pipeline end to end on real Windows x64 hardware (compile → makensis → manifest capture → boundary comparison, exit 0); the artifact is 80.41 MB.
+- `v0.1.3` ran that Windows installer pipeline end to end on real Windows x64 hardware (compile → makensis → manifest capture → static boundary checks, exit 0); the artifact is 80.41 MB.
 - The current source baseline does not include Windows code signing. Complete signing separately before formal binary distribution.
 - Dependency vulnerability audit requires a working npm audit endpoint. When the configured mirror does not provide one, `pnpm security-audit` **reports the failure honestly** rather than reporting a pass.
 
@@ -352,9 +352,9 @@ Notes:
 - `pnpm profile:verify` validates DeepShell Bundle/Profile/Preset relationships against the official DSH baseline.
 - `pnpm package:e2e` builds the E2E-only app package and captures its artifact manifest.
 - `pnpm package:mvp` is platform-aware:
-  - macOS: builds `.app`, signs, verifies, and generates `.dmg`;
-  - Windows: builds an NSIS installer in a Windows build environment.
-- `pnpm package:verified` rebuilds E2E and Release artifacts and compares their security boundaries.
+  - macOS: builds `.app`, signs, verifies, generates `.dmg`, captures release manifests, and requires the E2E/Release artifact comparison to pass;
+  - Windows: builds an NSIS installer in a Windows build environment, captures the release NSIS manifest, and runs static security-boundary checks.
+- `pnpm package:verified` rebuilds E2E and Release artifacts and compares their security boundaries on the macOS release route.
 - `pnpm licenses:collect`, `pnpm sbom:generate`, `pnpm package:report`, and `pnpm release:stage` prepare local release-support assets without publishing anything.
 - `pnpm diagnostics:collect` exports a local redacted diagnostics bundle under ignored staging.
 - `pnpm release:windows:check` reports the Windows x64 packaging route and must not be treated as Windows installer acceptance when run on macOS.

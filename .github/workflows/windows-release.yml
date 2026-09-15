@@ -12,6 +12,36 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Verify canonical v0.1.3 baseline tag
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $expected = 'ca4add9dc52c5053278570abb28e1d21ae5a0239'
+
+          $remotePeeled = (& git ls-remote --tags origin 'refs/tags/v0.1.3^{}').Trim()
+          if ($LASTEXITCODE -ne 0) {
+            throw "git ls-remote failed with exit code $LASTEXITCODE"
+          }
+          $expectedRemotePeeled = "$expected`trefs/tags/v0.1.3^{}"
+          if ($remotePeeled -ne $expectedRemotePeeled) {
+            throw "Unexpected remote v0.1.3 peeled ref: '$remotePeeled'"
+          }
+
+          & git fetch origin '+refs/tags/v0.1.3:refs/tags/v0.1.3'
+          if ($LASTEXITCODE -ne 0) {
+            throw "git fetch v0.1.3 failed with exit code $LASTEXITCODE"
+          }
+          $actual = (& git rev-parse 'v0.1.3^{commit}').Trim()
+          if ($LASTEXITCODE -ne 0) {
+            throw "git rev-parse v0.1.3^{commit} failed with exit code $LASTEXITCODE"
+          }
+          if ($actual -ne $expected) {
+            throw "Unexpected v0.1.3 peeled commit: '$actual'"
+          }
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
