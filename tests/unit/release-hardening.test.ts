@@ -376,7 +376,8 @@ describe('v0.1.1 release hardening scripts', () => {
         '--license-inventory', good,
         '--sbom', good,
         '--package-report', good,
-        '--security-audit', good
+        '--security-audit', good,
+        '--windows-installer-dir', resolve(temporary, 'empty-nsis')
       ])
       await writeFile(resolve(output, 'KEEP.txt'), 'old-snapshot')
 
@@ -388,7 +389,8 @@ describe('v0.1.1 release hardening scripts', () => {
         '--license-inventory', bad,
         '--sbom', good,
         '--package-report', good,
-        '--security-audit', good
+        '--security-audit', good,
+        '--windows-installer-dir', resolve(temporary, 'empty-nsis')
       ])).rejects.toThrow()
 
       expect(await readFile(resolve(output, 'KEEP.txt'), 'utf8')).toBe('old-snapshot')

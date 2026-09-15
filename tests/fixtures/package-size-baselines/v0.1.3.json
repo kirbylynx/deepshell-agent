@@ -14,6 +14,13 @@
   },
   "provenance": {
     "checkoutPolicy": "exact v0.1.3 commit; no tracked, untracked, or ignored source/config drift outside generated-output allowlist",
+    "windowsBaselineRebuild": {
+      "sourceRev": "detached exact commit ca4add9dc52c5053278570abb28e1d21ae5a0239 in an isolated worktree",
+      "buildCommand": "pnpm package:mvp",
+      "install": "silent NSIS install of the rebuild into a fresh test root",
+      "measurement": "deepshell-tree-v1 over the installed tree",
+      "hostEnvironment": "Windows x64; MSVC 19.29.30154 (VS 2019 Build Tools); Node 24.20.0; pnpm 10.30.2"
+    },
     "appInfoPlist": {
       "bundleShortVersion": "0.1.3",
       "infoPlistSha256": "910ec7b477fe56d2ba45d469a11791ca6654d30df0e0395ca1e1193bd690dd76",
@@ -44,14 +51,27 @@
       "sha256": "0414ae9b3580cfa08078fd3ab9946c71b3b5d4e9a72b5abd98ccfe304afc07a5"
     },
     "windowsInstalledTree": {
-      "status": "pending"
+      "status": "canonical",
+      "bytes": 536901173,
+      "files": 32226,
+      "contentSha256": "f11c5771a7b60cbf03a28a817f2d9eb565a4c92991c487f1eae8d5f91bfa33f0",
+      "sourceArtifactSha256": "d8ec1823964fdfe6d26f2d7fdf6f71065a61ffcf3e11b831cec03d604ecc0e2f",
+      "baselineSourceInputSha256": "fbcd8ff948dd21a369ad296211bb885e9e0b96b3113b9157e671402c946dd51d",
+      "algorithmVersion": "deepshell-tree-v1",
+      "fixtureSource": "canonical rebuild from peeled commit ca4add9dc52c5053278570abb28e1d21ae5a0239 in an isolated worktree on the Windows x64 build host; measured over a silent NSIS install into a fresh test root"
     },
     "windowsNsis": {
-      "status": "reference-only",
-      "bytes": 84314666,
+      "status": "canonical",
+      "bytes": 84350550,
       "files": 1,
-      "sha256": "3edb1a8cb52a48ffa92972bf767317e4ae814f92f261d6cab9204cb66cee4bd8",
-      "reason": "published asset exact-commit provenance not yet proven"
+      "sha256": "d8ec1823964fdfe6d26f2d7fdf6f71065a61ffcf3e11b831cec03d604ecc0e2f",
+      "fixtureSource": "canonical rebuild from peeled commit ca4add9dc52c5053278570abb28e1d21ae5a0239 in an isolated worktree on the Windows x64 build host",
+      "publishedAssetCrossRef": {
+        "bytes": 84314666,
+        "files": 1,
+        "sha256": "3edb1a8cb52a48ffa92972bf767317e4ae814f92f261d6cab9204cb66cee4bd8",
+        "note": "previously published v0.1.3 installer; byte-differs from the canonical rebuild (embedded build path and packing metadata); installed-tree Node/DSH subtrees were verified byte-identical; retained for cross-reference only and not used as the gate baseline"
+      }
     }
   },
   "sourceTrees": {
@@ -81,6 +101,6 @@
     }
   },
   "historicalNotes": {
-    "windowsInstalledTree": "approximately 512 MB and 32226 files; reference only, not a gate baseline"
+    "windowsInstalledTree": "historical note recorded before W0 completion: approximately 512 MB and 32226 files; the canonical rebuild measured 536901173 bytes / 32226 files, so this note is superseded by the canonical baseline above"
   }
 }

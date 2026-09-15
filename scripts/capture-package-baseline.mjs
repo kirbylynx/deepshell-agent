@@ -173,6 +173,15 @@ async function appBundleReceipt(appPath) {
   }
 }
 
+async function readOptionalJson(path) {
+  try {
+    return JSON.parse(await readFile(path, 'utf8'))
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null
+    throw error
+  }
+}
+
 async function fileMetric(path) {
   const content = await readFile(path)
   return {
@@ -198,6 +207,8 @@ export async function capturePackageBaseline() {
   const dmgPath = arg('--dmg')
   const packageManifestPath = arg('--package-manifest')
   const output = arg('--output')
+  // Windows 侧字段由 W0 在 Windows 主机上补齐；macOS 捕获不得覆盖已有结果。
+  const existingFixture = await readOptionalJson(resolve(root, 'tests/fixtures/package-size-baselines/v0.1.3.json'))
   const { stdout } = await execFileAsync('git', ['rev-parse', 'v0.1.3^{commit}'], { cwd: root })
   const actualTagCommit = stdout.trim()
   if (actualTagCommit !== EXPECTED_TAG_COMMIT) {
@@ -319,8 +330,8 @@ export async function capturePackageBaseline() {
     artifacts: {
       macosApp: treeMetric(app),
       macosDmg: dmg,
-      windowsInstalledTree: { status: 'pending' },
-      windowsNsis: {
+      windowsInstalledTree: existingFixture?.artifacts?.windowsInstalledTree ?? { status: 'pending' },
+      windowsNsis: existingFixture?.artifacts?.windowsNsis ?? {
         status: 'reference-only',
         bytes: 84314666,
         files: 1,
@@ -334,7 +345,7 @@ export async function capturePackageBaseline() {
       dsh: treeMetric(dsh),
       profileTemplate: treeMetric(profileTemplate),
     },
-    historicalNotes: {
+    historicalNotes: existingFixture?.historicalNotes ?? {
       windowsInstalledTree: 'approximately 512 MB and 32226 files; reference only, not a gate baseline',
     },
   }

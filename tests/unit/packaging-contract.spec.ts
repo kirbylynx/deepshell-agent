@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, resolve } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
@@ -39,6 +39,147 @@ function merge(left: Record<string, unknown>, right: Record<string, unknown>): R
       : value
   }
   return output
+}
+
+type BaselineFixture = {
+  canonicalSource: { peeledCommit: string; baselineSourceInputSha256: string }
+  measurement: { algorithm: string }
+  artifacts: { windowsNsis: { status: string; reason?: string; sha256: string; bytes: number } }
+}
+
+// Windows 平台无法复现 darwin-arm64 的 macOS app/DMG 场景，因此用当前平台真实存在的
+// NSIS installer 契约构造同一套派生断言；这里同时覆盖 Windows 侧 report 派生逻辑。
+function windowsNsisManifest(
+  baseline: BaselineFixture,
+  installerPath: string,
+  installerBytes: Buffer,
+  installerSha256: string,
+  sourceDigest: string,
+) {
+  return {
+    schemaVersion: 5,
+    platform: 'win32-x64',
+    mode: 'release',
+    applicationVersion: '0.1.4',
+    artifactKind: 'nsis-installer',
+    windowsSourceInputSha256: sourceDigest,
+    binarySourceInputSha256: sourceDigest,
+    inspections: [
+      {
+        subject: 'runtime-node',
+        inspectionMode: 'exact-artifact-tree',
+        status: 'equivalent',
+        resources: [{ path: 'runtime/node/win32-x64/node.exe', bytes: 1, sha256: 'a'.repeat(64) }],
+        runtimePlatforms: ['win32-x64'],
+        size: { bytes: 106774079, files: 1994 },
+        contentSha256: 'b'.repeat(64),
+      },
+      {
+        subject: 'runtime-dsh',
+        inspectionMode: 'exact-artifact-tree',
+        status: 'equivalent',
+        resources: [{ path: 'runtime/dsh/index.js', bytes: 1, sha256: 'a'.repeat(64) }],
+        runtimePlatforms: [],
+        size: { bytes: 220981087, files: 25399 },
+        contentSha256: 'c'.repeat(64),
+      },
+      {
+        subject: 'profile-template',
+        inspectionMode: 'exact-artifact-tree',
+        status: 'equivalent',
+        resources: [{ path: 'runtime/profile-template/template-manifest.json', bytes: 1, sha256: 'a'.repeat(64) }],
+        runtimePlatforms: [],
+        size: { bytes: 67274, files: 17 },
+        contentSha256: 'd'.repeat(64),
+      },
+      {
+        subject: 'nsis-installer',
+        inspectionMode: 'file-metadata-only',
+        status: 'present',
+        resources: [{ path: basename(installerPath), bytes: installerBytes.length, sha256: installerSha256 }],
+        runtimePlatforms: [],
+        size: { bytes: installerBytes.length, files: 1 },
+        sha256: installerSha256,
+      },
+    ],
+    baseline: {
+      status: baseline.artifacts.windowsNsis.status,
+      ...(baseline.artifacts.windowsNsis.reason ? { reason: baseline.artifacts.windowsNsis.reason } : {}),
+      canonicalSourceRef: 'v0.1.3',
+      canonicalSourceCommit: baseline.canonicalSource.peeledCommit,
+      baselineSourceInputSha256: baseline.canonicalSource.baselineSourceInputSha256,
+      algorithmVersion: baseline.measurement.algorithm,
+      artifactSha256: baseline.artifacts.windowsNsis.sha256,
+    },
+  }
+}
+
+async function writeWindowsNsisInstaller(temporary: string) {
+  const installer = resolve(temporary, 'DeepShell Agent_0.1.4_x64-setup.exe')
+  await writeFile(installer, 'installer')
+  const installerBytes = await readFile(installer)
+  const installerSha256 = createHash('sha256').update(installerBytes).digest('hex')
+  return { installer, installerBytes, installerSha256 }
+}
+
+async function runWindowsNsisReportCase(temporary: string, output: string, baseline: BaselineFixture) {
+  const { installer, installerBytes, installerSha256 } = await writeWindowsNsisInstaller(temporary)
+  const sourceDigest = await platformInputDigest(workspace, 'win32-x64')
+  const manifest = windowsNsisManifest(baseline, installer, installerBytes, installerSha256, sourceDigest)
+  const manifestPath = resolve(temporary, 'manifest.json')
+  await writeFile(manifestPath, JSON.stringify(manifest))
+
+  await runPackageReport([
+    '--version', '0.1.4',
+    '--output-dir', output,
+    '--windows-installer', installer,
+    '--package-manifest', manifestPath,
+  ])
+
+  const report = JSON.parse(await readFile(resolve(output, 'package-report.json'), 'utf8'))
+  expect(report.assets.windowsInstaller.bytes).toBe(installerBytes.length)
+  expect(report.assets.windowsInstaller.sha256).toBe(installerSha256)
+  expect(report.assets.windowsInstaller.baselineStatus).toBe(baseline.artifacts.windowsNsis.status)
+  expect(report.assets.windowsInstaller.deltaBytes).toBe(installerBytes.length - baseline.artifacts.windowsNsis.bytes)
+  expect(report.assets.runtimeNode.bytes).toBe(106774079)
+  expect(report.assets.runtimeNode.files).toBe(1994)
+  expect(report.assets.runtimeNode.baselineVersion).toBe('0.1.3')
+  expect(report.assets.runtimeNode.deltaBytes).toBe(0)
+  expect(report.assets.runtimeNode.runtimePlatforms).toEqual(['win32-x64'])
+  expect(report.foreignRuntimePaths).toEqual([])
+}
+
+async function runWindowsStrictNsisCase(temporary: string, baseline: BaselineFixture) {
+  const { installer, installerBytes, installerSha256 } = await writeWindowsNsisInstaller(temporary)
+  const sourceDigest = await platformInputDigest(workspace, 'win32-x64')
+  const baseManifest = windowsNsisManifest(baseline, installer, installerBytes, installerSha256, sourceDigest)
+  const wrongKind = { ...baseManifest, artifactKind: 'windows-installed-tree' }
+  const staleBaseline = { ...baseManifest, baseline: { ...baseManifest.baseline, artifactSha256: '0'.repeat(64) } }
+  const foreignRuntime = {
+    ...baseManifest,
+    inspections: [
+      ...baseManifest.inspections,
+      {
+        subject: 'runtime-node-foreign',
+        inspectionMode: 'exact-artifact-tree',
+        status: 'equivalent',
+        resources: [{ path: 'runtime/node/darwin-arm64/bin/node', bytes: 1, sha256: 'a'.repeat(64) }],
+        runtimePlatforms: ['darwin-arm64'],
+        size: { bytes: 1, files: 1 },
+        contentSha256: 'b'.repeat(64),
+      },
+    ],
+  }
+  for (const [name, manifest] of Object.entries({ wrongKind, staleBaseline, foreignRuntime })) {
+    const path = resolve(temporary, `${name}.json`)
+    await writeFile(path, JSON.stringify(manifest))
+    await expect(runPackageReport([
+      '--version', '0.1.4',
+      '--output-dir', resolve(temporary, name),
+      '--windows-installer', installer,
+      '--package-manifest', path,
+    ])).rejects.toThrow()
+  }
 }
 
 describe('v0.1.4 打包契约', () => {
@@ -189,6 +330,10 @@ describe('v0.1.4 打包契约', () => {
       const output = resolve(temporary, 'release')
       await mkdir(output, { recursive: true })
       const baseline = JSON.parse(await readFile(resolve(workspace, 'tests/fixtures/package-size-baselines/v0.1.3.json'), 'utf8'))
+      if (process.platform !== 'darwin') {
+        await runWindowsNsisReportCase(temporary, output, baseline)
+        return
+      }
       const app = resolve(temporary, 'DeepShell Agent.app')
       await mkdir(resolve(app, 'runtime/node/darwin-arm64/bin'), { recursive: true })
       await writeFile(resolve(app, 'runtime/node/darwin-arm64/bin/node'), 'node')
@@ -323,6 +468,10 @@ describe('v0.1.4 打包契约', () => {
       ])).rejects.toThrow(/manifest/)
 
       const baseline = JSON.parse(await readFile(resolve(workspace, 'tests/fixtures/package-size-baselines/v0.1.3.json'), 'utf8'))
+      if (process.platform !== 'darwin') {
+        await runWindowsStrictNsisCase(temporary, baseline)
+        return
+      }
       const sourceDigest = await platformInputDigest(workspace, 'darwin-arm64')
       const app = resolve(temporary, 'DeepShell Agent.app')
       await mkdir(resolve(app, 'runtime/node/darwin-arm64/bin'), { recursive: true })
