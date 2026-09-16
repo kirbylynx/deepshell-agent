@@ -25,7 +25,7 @@ const MAX_SESSION_BACKUPS: usize = 3;
 ///
 /// Unix 上原样返回。
 #[cfg(windows)]
-fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
+pub(crate) fn strip_verbatim_prefix(path: PathBuf) -> PathBuf {
     let text = path.as_os_str().to_string_lossy();
     let stripped = if let Some(rest) = text.strip_prefix(r"\\?\UNC\") {
         format!(r"\\{rest}")

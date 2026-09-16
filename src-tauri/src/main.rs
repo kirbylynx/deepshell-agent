@@ -10,5 +10,11 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
+    // 维护命令（NSIS 卸载兜底）必须在任何 Tauri / WebView / Sidecar 初始化之前处理并退出，
+    // 否则卸载流程可能在应用仍在运行时误启动第二个实例。
+    #[cfg(windows)]
+    if let Some(code) = deepshell_agent_lib::maintenance::run_if_requested() {
+        std::process::exit(code);
+    }
     deepshell_agent_lib::run();
 }

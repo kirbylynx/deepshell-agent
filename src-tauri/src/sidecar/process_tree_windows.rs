@@ -288,6 +288,186 @@ fn leader_alive(pid: u32, child: &mut Option<&mut Child>) -> Result<bool, AppErr
     Ok(process_alive(pid))
 }
 
+/// 卸载兜底清理的可机器判定结果（NSIS PREUNINSTALL hook 依赖）。
+pub enum UninstallCleanup {
+    /// 已确认当前安装目录下没有受管进程（可能清理了若干进程）。
+    Clean { terminated: Vec<u32> },
+    /// 主程序仍在运行：卸载器应提示用户先关闭应用（不得强杀主程序）。
+    AppRunning { pid: u32 },
+    /// 无法证明当前安装目录未被受管进程占用（例如进程枚举不可用）：必须失败关闭。
+    Unverifiable { reason: String },
+}
+
+/// 维护命令的清理入口（设计 §10 / REQ-1407 的卸载兜底）。
+///
+/// 规则：
+/// 1. 主程序（安装目录下的应用可执行文件）仍在运行 → `AppRunning`，不终止任何进程；
+/// 2. ownership record 的 `expected_executable` 规范化为当前安装目录内的 Node 路径时，
+///    校验 leader 身份后终止其进程树并**退休**记录；指向另一份安装/便携目录的记录
+///    **不终止、不移动**；
+/// 3. 无论记录如何，都对当前安装目录的**精确可执行路径**枚举一次并清理路径/身份
+///    均可验证的进程；枚举不可用 → `Unverifiable`；
+/// 4. 禁止按进程名批量终止，禁止终止主程序本身。
+pub fn cleanup_for_uninstall(
+    install_root: &Path,
+    app_data_root: &Path,
+    self_pid: u32,
+    deadline: Instant,
+) -> Result<UninstallCleanup, AppError> {
+    let expected_node = install_root
+        .join("runtime")
+        .join("node")
+        .join("win32-x64")
+        .join("node.exe");
+    let expected_node = fs::canonicalize(&expected_node).map_err(|error| {
+        AppError::new(
+            ErrorCode::RuntimeStopFailed,
+            format!("无法解析安装目录内的 Node 路径：{error}"),
+        )
+    })?;
+
+    // 1. 主程序仍在运行 → 交给卸载器提示用户先关闭应用。
+    for main_name in ["deepshell-agent.exe", "DeepShell Agent.exe"] {
+        let main_exe = install_root.join(main_name);
+        let Ok(main_exe) = fs::canonicalize(&main_exe) else {
+            continue;
+        };
+        let running = match enumerate_pids_by_executable(&main_exe, self_pid) {
+            Ok(pids) => pids,
+            Err(error) => {
+                return Ok(UninstallCleanup::Unverifiable {
+                    reason: format!("无法枚举主程序进程：{error}"),
+                })
+            }
+        };
+        if let Some(pid) = running.first() {
+            return Ok(UninstallCleanup::AppRunning { pid: *pid });
+        }
+    }
+
+    let mut terminated = Vec::new();
+    let registry_path = app_data_root.join("runtime-state").join("ownership.json");
+
+    // 2. ownership record：只处理属于当前安装的记录。
+    match read_registry(&registry_path) {
+        Ok(Some(record)) => {
+            let record_target = fs::canonicalize(&record.expected_executable).ok();
+            if record_target.as_deref() == Some(expected_node.as_path()) {
+                if process_alive(record.leader_pid) {
+                    let _ = verify_executable_if_available(record.leader_pid, &expected_node);
+                    terminate_pid_tree(record.leader_pid, None, deadline, None)?;
+                    terminated.push(record.leader_pid);
+                }
+                unregister(&registry_path)?;
+            }
+            // 记录属于另一份安装/便携目录或已损坏：保留它，继续做精确路径枚举。
+        }
+        Ok(None) => {}
+        Err(error) => {
+            let _ = crate::logging::record_detailed(
+                &app_data_root.join("logs"),
+                "error",
+                "maintenance_record_unreadable",
+                Some(ErrorCode::RuntimeStopFailed),
+                None,
+                Some(error.diagnostic_message()),
+            );
+        }
+    }
+
+    // 3. 精确路径枚举兜底：只清理可执行路径与身份都可验证的受管进程。
+    let remaining = match enumerate_pids_by_executable(&expected_node, self_pid) {
+        Ok(pids) => pids,
+        Err(error) => {
+            return Ok(UninstallCleanup::Unverifiable {
+                reason: format!("无法枚举受管 Sidecar 进程：{error}"),
+            })
+        }
+    };
+    for pid in remaining {
+        if terminated.contains(&pid) {
+            continue;
+        }
+        let _ = verify_executable_if_available(pid, &expected_node);
+        terminate_pid_tree(pid, None, deadline, None)?;
+        terminated.push(pid);
+    }
+
+    let outcome = UninstallCleanup::Clean { terminated };
+    let summary = match &outcome {
+        UninstallCleanup::Clean { terminated } => format!("clean; terminated={terminated:?}"),
+        UninstallCleanup::AppRunning { pid } => format!("app-running; pid={pid}"),
+        UninstallCleanup::Unverifiable { reason } => format!("unverifiable; {reason}"),
+    };
+    let _ = crate::logging::record_detailed(
+        &app_data_root.join("logs"),
+        "info",
+        "maintenance_cleanup",
+        None,
+        None,
+        Some(&summary),
+    );
+    Ok(outcome)
+}
+
+/// 通过 CIM 枚举可执行文件路径精确匹配（规范化、大小写不敏感）的进程。
+///
+/// 目标路径经**环境变量**传给子进程，避免把用户可控路径拼接进 PowerShell 命令行；
+/// 结果排除 `exclude_pid`（维护命令自身）。
+///
+/// ⚠️ Windows 的 `canonicalize` 返回 `\\?\` 前缀形式，而 CIM 的 `ExecutablePath`
+/// 是普通形式；必须先去前缀再比较，否则枚举会假阴性（W5 实测：应用运行中的主程序
+/// 检测曾因此失效，维护命令误把运行中的应用当作未运行）。
+fn enumerate_pids_by_executable(expected: &Path, exclude_pid: u32) -> Result<Vec<u32>, AppError> {
+    let expected = crate::paths::strip_verbatim_prefix(expected.to_path_buf());
+    let script = "$target = [System.IO.Path]::GetFullPath($env:DEEPSHELL_MAINTENANCE_TARGET); \
+Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath)).Equals($target, [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { [Console]::Out.WriteLine($_.ProcessId) }";
+    let output = console_command("powershell.exe")
+        .env("DEEPSHELL_MAINTENANCE_TARGET", &expected)
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ])
+        .output()
+        .map_err(|error| {
+            AppError::new(
+                ErrorCode::RuntimeStopFailed,
+                format!("无法启动进程枚举：{error}"),
+            )
+        })?;
+    if !output.status.success() {
+        return Err(AppError::new(
+            ErrorCode::RuntimeStopFailed,
+            format!(
+                "进程枚举失败：{}",
+                String::from_utf8_lossy(&output.stderr).trim()
+            ),
+        ));
+    }
+    let mut pids = Vec::new();
+    for line in String::from_utf8_lossy(&output.stdout).lines() {
+        let line = line.trim();
+        if line.is_empty() {
+            continue;
+        }
+        let pid: u32 = line.parse().map_err(|_| {
+            AppError::new(
+                ErrorCode::RuntimeStopFailed,
+                format!("无法解析进程枚举输出：{line}"),
+            )
+        })?;
+        if pid != exclude_pid {
+            pids.push(pid);
+        }
+    }
+    pids.sort_unstable();
+    pids.dedup();
+    Ok(pids)
+}
+
 fn process_alive(pid: u32) -> bool {
     console_command("powershell.exe")
         .args([

@@ -10,7 +10,8 @@
       },
       "nsis": {
         "installerIcon": "icons/icon.ico",
-        "displayLanguageSelector": false
+        "displayLanguageSelector": false,
+        "installerHooks": "windows/installer-hooks.nsh"
       }
     }
   }

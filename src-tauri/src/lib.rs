@@ -1,6 +1,8 @@
 mod app_state;
 mod error;
 mod logging;
+#[cfg(windows)]
+pub mod maintenance;
 mod menu;
 mod paths;
 mod sidecar;
