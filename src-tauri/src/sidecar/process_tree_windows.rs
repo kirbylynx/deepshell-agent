@@ -215,9 +215,43 @@ fn terminate_pid_tree(
     deadline: Instant,
     abort_on_shutdown: Option<&AtomicBool>,
 ) -> Result<(), AppError> {
-    let _ = console_command("taskkill")
+    // 幂等：leader 已经不在时无需终止（例如进程在进入清理流程前自行退出）。
+    // 必须先于 taskkill 判断，否则"对已不存在的 PID 调用 taskkill 返回非零"会被误判为清理故障。
+    if !leader_alive(pid, &mut child)? {
+        return Ok(());
+    }
+    // 首选系统级进程树终止，并**保留**结果用于失败判定与诊断：
+    // 此前 `let _ = ...output()` 完全吞掉 taskkill 的退出码与 stderr，只要 leader 恰好在
+    // 等待窗口内退出就会把"未能确认整棵树已终止"误报为成功（REL-024 语义要求
+    // 返回成功前必须确认受管进程树已退出）。
+    let taskkill = console_command("taskkill")
         .args(["/PID", &pid.to_string(), "/T", "/F"])
         .output();
+    let taskkill_failure = match &taskkill {
+        Ok(output) if output.status.success() => None,
+        Ok(output) => Some(format!(
+            "taskkill 退出码 {:?}；stderr: {}",
+            output.status.code(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+        Err(error) => Some(format!("taskkill 无法启动：{error}")),
+    };
+    if taskkill_failure.is_some() {
+        // 第二手段：仅终止 leader（Child handle 强杀 + Stop-Process 兜底）。
+        // 这不能替代进程树终止，只用于把 leader 收敛到可退出状态。
+        if let Some(process) = child.as_deref_mut() {
+            let _ = process.kill();
+        }
+        let _ = console_command("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                &format!("Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue"),
+            ])
+            .status();
+    }
     while Instant::now() < deadline {
         if abort_on_shutdown.is_some_and(|intent| intent.load(Ordering::SeqCst)) {
             return Err(AppError::new(
@@ -225,19 +259,33 @@ fn terminate_pid_tree(
                 "旧 Runtime 恢复清理已交由退出流程接管",
             ));
         }
-        if let Some(process) = child.as_deref_mut() {
-            if process.try_wait().map_err(runtime_stop_error)?.is_some() {
-                return Ok(());
-            }
-        } else if !process_alive(pid) {
-            return Ok(());
+        if !leader_alive(pid, &mut child)? {
+            return match taskkill_failure {
+                None => Ok(()),
+                Some(summary) => Err(AppError::new(
+                    ErrorCode::RuntimeStopFailed,
+                    format!(
+                        "Sidecar 主进程已退出，但无法确认进程树已完整终止（{summary}）；请重试退出或恢复"
+                    ),
+                )),
+            };
         }
         thread::sleep(Duration::from_millis(50));
     }
+    let suffix = taskkill_failure
+        .map(|summary| format!("；taskkill：{summary}"))
+        .unwrap_or_default();
     Err(AppError::new(
         ErrorCode::RuntimeStopFailed,
-        "已登记的 Sidecar 进程树在 5 秒后仍未退出",
+        format!("已登记的 Sidecar 进程树在 5 秒后仍未退出{suffix}"),
     ))
+}
+
+fn leader_alive(pid: u32, child: &mut Option<&mut Child>) -> Result<bool, AppError> {
+    if let Some(process) = child.as_deref_mut() {
+        return Ok(process.try_wait().map_err(runtime_stop_error)?.is_none());
+    }
+    Ok(process_alive(pid))
 }
 
 fn process_alive(pid: u32) -> bool {
@@ -375,4 +423,81 @@ pub fn open_logs_directory(root: &Path, _: &AppHandle) -> Result<(), AppError> {
         .spawn()
         .map(|_| ())
         .map_err(|error| AppError::new(ErrorCode::LogsUnavailable, error.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
+
+    fn bundled_node() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime/node/win32-x64/node.exe")
+    }
+
+    /// 真实进程树：父 Node 进程保持运行，并派生一个同样保持运行的子进程。
+    fn spawn_tree() -> (Child, u32) {
+        let node = bundled_node();
+        let mut child = console_command(node.to_str().expect("node 路径必须是 UTF-8"))
+            .args([
+                "-e",
+                "const {spawn}=require('node:child_process');const c=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});console.log(c.pid);setInterval(()=>{},1000)",
+            ])
+            .stdout(Stdio::piped())
+            .spawn()
+            .expect("无法启动测试用 Node 进程");
+        let mut line = String::new();
+        BufReader::new(child.stdout.take().expect("stdout 必须可读"))
+            .read_line(&mut line)
+            .expect("必须读到子进程 PID");
+        let child_pid: u32 = line.trim().parse().expect("子进程 PID 必须是数字");
+        (child, child_pid)
+    }
+
+    #[test]
+    fn terminates_a_real_registered_process_tree_and_retires_the_record() {
+        let node = bundled_node();
+        assert!(
+            node.is_file(),
+            "测试前必须准备 bundled Node（pnpm runtime:prepare）"
+        );
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = temporary.path().join("ownership.json");
+        let (mut leader, tree_child_pid) = spawn_tree();
+
+        register(&registry, leader.id(), &node, "tree-test").unwrap();
+        begin_cleanup(&registry).unwrap();
+        terminate_registered(
+            &registry,
+            Some(&mut leader),
+            Instant::now() + Duration::from_secs(8),
+            None,
+        )
+        .unwrap();
+        unregister(&registry).unwrap();
+
+        assert!(!process_alive(tree_child_pid), "进程树子进程必须被终止");
+        assert!(!registry.exists(), "ownership record 必须被退休");
+    }
+
+    #[test]
+    fn dead_leader_is_idempotent_success_even_though_taskkill_would_fail() {
+        // 已不存在的 leader：清理必须幂等成功，而不是把"taskkill 对死 PID 返回非零"
+        // 误判为清理故障（回归保护：存活判定必须先于 taskkill）。
+        let node = bundled_node();
+        let temporary = tempfile::tempdir().unwrap();
+        let registry = temporary.path().join("ownership.json");
+        let dead_pid = 0x7FFF_FFF0_u32;
+        register(&registry, dead_pid, &node, "dead-leader").unwrap();
+        begin_cleanup(&registry).unwrap();
+        terminate_registered(
+            &registry,
+            None,
+            Instant::now() + Duration::from_secs(2),
+            None,
+        )
+        .unwrap();
+        unregister(&registry).unwrap();
+        assert!(!registry.exists());
+    }
 }
