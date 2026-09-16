@@ -1,13 +1,13 @@
 mod app_state;
 mod error;
 mod logging;
+mod menu;
 mod paths;
 mod sidecar;
 mod webview;
 
 use app_state::AppState;
 use std::sync::Arc;
-use tauri::menu::{AboutMetadataBuilder, Menu, PredefinedMenuItem, Submenu};
 use tauri::{
     webview::NewWindowResponse, AppHandle, Manager, State, WebviewUrl, WebviewWindowBuilder,
 };
@@ -57,14 +57,9 @@ fn open_logs_directory(app: AppHandle, state: State<'_, AppState>) -> Result<(),
 }
 
 #[tauri::command]
-fn quit_app(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
-    state.stop_runtime().map_err(|error| {
-        state.record_failure(&error, false);
-        let _ = state.show_failure_window(&app);
-        format!("{}: {}", error.code(), error.user_message())
-    })?;
-    app.exit(0);
-    Ok(())
+fn quit_app(app: AppHandle) {
+    // 与菜单 Exit/Quit 共用统一安全退出入口：清理失败时不退出并展示失败状态。
+    menu::request_exit(&app);
 }
 
 #[cfg(feature = "poc-e2e")]
@@ -80,30 +75,9 @@ pub fn run() {
     #[cfg(feature = "poc-e2e")]
     let builder = builder.plugin(tauri_plugin_wdio_webdriver::init());
     let application = builder
-        .menu(|app| {
-            let about = AboutMetadataBuilder::new()
-                .name(Some("DeepShell Agent"))
-                .version(Some(env!("CARGO_PKG_VERSION")))
-                .credits(Some(
-                    "A desktop agent powered by DeepSeek Harness.\nNode.js 24.20.0\nDeepSeek Harness 0.1.5-rc.1",
-                ))
-                .build();
-            let application_menu = Submenu::with_items(
-                app,
-                "DeepShell Agent",
-                true,
-                &[
-                    &PredefinedMenuItem::about(app, None, Some(about))?,
-                    &PredefinedMenuItem::separator(app)?,
-                    &PredefinedMenuItem::services(app, None)?,
-                    &PredefinedMenuItem::separator(app)?,
-                    &PredefinedMenuItem::hide(app, None)?,
-                    &PredefinedMenuItem::hide_others(app, None)?,
-                    &PredefinedMenuItem::separator(app)?,
-                    &PredefinedMenuItem::quit(app, None)?,
-                ],
-            )?;
-            Menu::with_items(app, &[&application_menu])
+        .menu(menu::build_application_menu)
+        .on_menu_event(|app, event| {
+            menu::handle_menu_event(app, event.id().as_ref());
         })
         .on_window_event(|window, event| {
             if window.label() != "main" {
@@ -168,8 +142,7 @@ pub fn run() {
                 }
             });
             Ok(())
-        })
-        ;
+        });
     #[cfg(feature = "poc-e2e")]
     let application = application.invoke_handler(tauri::generate_handler![
         runtime_status,

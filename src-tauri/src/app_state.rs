@@ -120,6 +120,18 @@ impl AppState {
         self.supervisor.stop()
     }
 
+    /// 记录一次菜单动作到审计日志：只写稳定菜单 id，不含用户内容。
+    pub fn record_menu_action(&self, menu_id: &str) {
+        let _ = crate::logging::record_detailed(
+            &self.logs,
+            "info",
+            "menu_action",
+            None,
+            None,
+            Some(menu_id),
+        );
+    }
+
     pub fn record_failure(&self, error: &AppError, startup: bool) {
         self.supervisor.record_failure(error, startup);
     }
