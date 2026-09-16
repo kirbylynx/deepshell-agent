@@ -115,6 +115,10 @@ const releaseManifest = packageManifestArgument === 'none' ? null : await option
 const releaseDmgManifest = process.platform === 'darwin' && dmgManifestArgument !== 'none'
   ? await optionalJson(resolve(dmgManifestArgument))
   : null
+const portableManifestArgument = argValue('--portable-manifest', resolve(root, 'runtime/staging/package-release-win32-x64-windows-portable.json'))
+const releasePortableManifest = process.platform === 'win32' && portableManifestArgument !== 'none'
+  ? await optionalJson(resolve(portableManifestArgument))
+  : null
 const runtimePlatform = currentRuntimePlatform()
 const currentSourceInputSha256 = await platformInputDigest(root, runtimePlatform)
 const sourceDigestField = runtimePlatform === 'darwin-arm64' ? 'macosSourceInputSha256' : 'windowsSourceInputSha256'
@@ -191,6 +195,12 @@ const releaseDmgManifestSummary = manifestSummary(
   'macos-dmg',
   runtimePlatform === 'darwin-arm64',
 )
+const releasePortableManifestSummary = manifestSummary(
+  releasePortableManifest,
+  'portable package manifest',
+  'windows-portable',
+  runtimePlatform === 'win32-x64',
+)
 function presentManifest(manifest, summary) {
   return manifest !== null && summary.status === 'present' ? manifest : null
 }
@@ -254,6 +264,7 @@ function foreignRuntimePathsFromManifests(manifests) {
 
 const validReleaseManifest = presentManifest(releaseManifest, releaseManifestSummary)
 const validReleaseDmgManifest = presentManifest(releaseDmgManifest, releaseDmgManifestSummary)
+const validReleasePortableManifest = presentManifest(releasePortableManifest, releasePortableManifestSummary)
 const fallbackAppMetrics = await directoryMetrics(appPath)
 const fallbackDmgMetrics = await dmgMetric()
 const fallbackWindowsInstallerMetrics = await windowsInstallerMetric()
@@ -263,6 +274,22 @@ const windowsInstallerMetrics = attachBaselineDelta(
   inspectionMetric(validReleaseManifest, 'nsis-installer') ?? fallbackWindowsInstallerMetrics,
   'windowsInstaller',
 )
+// portable 为首版：只记录 staging/archive/extracted 三方指标，不做 v0.1.3 基线比较（REQ-1408）。
+const portableStagingMetrics = inspectionMetric(validReleasePortableManifest, 'staging')
+const portableArchiveMetrics = inspectionMetric(validReleasePortableManifest, 'archive')
+const portableExtractedMetrics = inspectionMetric(validReleasePortableManifest, 'extracted')
+if (validReleasePortableManifest !== null &&
+    (portableStagingMetrics?.contentSha256 !== portableExtractedMetrics?.contentSha256 ||
+     portableStagingMetrics?.bytes !== portableExtractedMetrics?.bytes ||
+     portableStagingMetrics?.files !== portableExtractedMetrics?.files)) {
+  throw new Error('package report 的 portable staging 与 extracted 不一致')
+}
+const windowsPortableMetrics = validReleasePortableManifest === null ? { status: 'missing' } : {
+  status: 'present',
+  staging: portableStagingMetrics,
+  archive: portableArchiveMetrics,
+  extracted: portableExtractedMetrics,
+}
 const runtimeNodeMetrics = attachBaselineDelta(
   inspectionMetric(validReleaseManifest, 'runtime-node') ??
     await directoryMetrics(resolve(argValue('--runtime-node', resolve(root, `runtime/node/${runtimePlatform}`)))),
@@ -315,6 +342,7 @@ const report = {
     app: appMetrics,
     dmg: dmgMetrics,
     windowsInstaller: windowsInstallerMetrics,
+    windowsPortable: windowsPortableMetrics,
     runtimeNode: runtimeNodeMetrics,
     runtimeDsh: runtimeDshMetrics,
     profileTemplate: profileTemplateMetrics,
@@ -323,6 +351,7 @@ const report = {
   manifests: {
     releasePackageManifest: releaseManifestSummary,
     releaseDmgManifest: releaseDmgManifestSummary,
+    releasePortableManifest: releasePortableManifestSummary,
     licenseInventory: staleLicenseInventoryVersion !== null ? {
       status: 'stale-version',
       foundVersion: staleLicenseInventoryVersion,

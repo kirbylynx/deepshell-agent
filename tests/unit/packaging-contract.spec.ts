@@ -14,10 +14,19 @@ import {
   assertArtifactNameMatchesVersion,
   isMacosDmgName,
   isWindowsNsisInstallerName,
+  isWindowsPortableZipName,
   selectWindowsNsisInstallerName,
+  selectWindowsPortableZipName,
   uniqueMatchingArtifact,
 } from '../../scripts/lib/artifact-selection.mjs'
 import { packageCommandPlan } from '../../scripts/lib/process-plan.mjs'
+import {
+  assertPortableLayout,
+  assertPortableTargetPath,
+  assertSafePortableStageBase,
+  portableAllowlist,
+  portablePaths,
+} from '../../scripts/create-windows-portable.mjs'
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const execFileAsync = promisify(execFile)
@@ -122,18 +131,70 @@ async function writeWindowsNsisInstaller(temporary: string) {
   return { installer, installerBytes, installerSha256 }
 }
 
+// portable 清单为首版：baseline 保持 pending，只要求 staging/archive/extracted 三方一致。
+function windowsPortableManifest(baseline: BaselineFixture, sourceDigest: string) {
+  return {
+    schemaVersion: 5,
+    platform: 'win32-x64',
+    mode: 'release',
+    applicationVersion: '0.1.4',
+    artifactKind: 'windows-portable',
+    windowsSourceInputSha256: sourceDigest,
+    binarySourceInputSha256: sourceDigest,
+    inspections: [
+      {
+        subject: 'staging',
+        inspectionMode: 'exact-artifact-tree',
+        status: 'present',
+        resources: [{ path: 'DeepShell Agent.exe', bytes: 1, sha256: 'a'.repeat(64) }],
+        runtimePlatforms: ['win32-x64'],
+        size: { bytes: 1024, files: 2 },
+        contentSha256: 'e'.repeat(64),
+      },
+      {
+        subject: 'archive',
+        inspectionMode: 'file-metadata-only',
+        status: 'present',
+        resources: [{ path: 'DeepShell.Agent_0.1.4_x64-portable.zip', bytes: 512, sha256: 'f'.repeat(64) }],
+        runtimePlatforms: [],
+        size: { bytes: 512, files: 1 },
+        sha256: 'f'.repeat(64),
+      },
+      {
+        subject: 'extracted',
+        inspectionMode: 'archive-extracted-tree',
+        status: 'equivalent',
+        resources: [{ path: 'DeepShell Agent.exe', bytes: 1, sha256: 'a'.repeat(64) }],
+        runtimePlatforms: ['win32-x64'],
+        size: { bytes: 1024, files: 2 },
+        contentSha256: 'e'.repeat(64),
+      },
+    ],
+    baseline: {
+      status: 'pending',
+      canonicalSourceRef: 'v0.1.3',
+      canonicalSourceCommit: baseline.canonicalSource.peeledCommit,
+      baselineSourceInputSha256: baseline.canonicalSource.baselineSourceInputSha256,
+      algorithmVersion: baseline.measurement.algorithm,
+    },
+  }
+}
+
 async function runWindowsNsisReportCase(temporary: string, output: string, baseline: BaselineFixture) {
   const { installer, installerBytes, installerSha256 } = await writeWindowsNsisInstaller(temporary)
   const sourceDigest = await platformInputDigest(workspace, 'win32-x64')
   const manifest = windowsNsisManifest(baseline, installer, installerBytes, installerSha256, sourceDigest)
   const manifestPath = resolve(temporary, 'manifest.json')
   await writeFile(manifestPath, JSON.stringify(manifest))
+  const portableManifestPath = resolve(temporary, 'portable-manifest.json')
+  await writeFile(portableManifestPath, JSON.stringify(windowsPortableManifest(baseline, sourceDigest)))
 
   await runPackageReport([
     '--version', '0.1.4',
     '--output-dir', output,
     '--windows-installer', installer,
     '--package-manifest', manifestPath,
+    '--portable-manifest', portableManifestPath,
   ])
 
   const report = JSON.parse(await readFile(resolve(output, 'package-report.json'), 'utf8'))
@@ -141,6 +202,9 @@ async function runWindowsNsisReportCase(temporary: string, output: string, basel
   expect(report.assets.windowsInstaller.sha256).toBe(installerSha256)
   expect(report.assets.windowsInstaller.baselineStatus).toBe(baseline.artifacts.windowsNsis.status)
   expect(report.assets.windowsInstaller.deltaBytes).toBe(installerBytes.length - baseline.artifacts.windowsNsis.bytes)
+  expect(report.assets.windowsPortable.status).toBe('present')
+  expect(report.assets.windowsPortable.archive.sha256).toBe('f'.repeat(64))
+  expect(report.assets.windowsPortable.staging.contentSha256).toBe('e'.repeat(64))
   expect(report.assets.runtimeNode.bytes).toBe(106774079)
   expect(report.assets.runtimeNode.files).toBe(1994)
   expect(report.assets.runtimeNode.baselineVersion).toBe('0.1.3')
@@ -153,6 +217,8 @@ async function runWindowsStrictNsisCase(temporary: string, baseline: BaselineFix
   const { installer, installerBytes, installerSha256 } = await writeWindowsNsisInstaller(temporary)
   const sourceDigest = await platformInputDigest(workspace, 'win32-x64')
   const baseManifest = windowsNsisManifest(baseline, installer, installerBytes, installerSha256, sourceDigest)
+  const portableManifestPath = resolve(temporary, 'portable-manifest.json')
+  await writeFile(portableManifestPath, JSON.stringify(windowsPortableManifest(baseline, sourceDigest)))
   const wrongKind = { ...baseManifest, artifactKind: 'windows-installed-tree' }
   const staleBaseline = { ...baseManifest, baseline: { ...baseManifest.baseline, artifactSha256: '0'.repeat(64) } }
   const foreignRuntime = {
@@ -178,6 +244,7 @@ async function runWindowsStrictNsisCase(temporary: string, baseline: BaselineFix
       '--output-dir', resolve(temporary, name),
       '--windows-installer', installer,
       '--package-manifest', path,
+      '--portable-manifest', portableManifestPath,
     ])).rejects.toThrow()
   }
 }
@@ -298,6 +365,57 @@ describe('v0.1.4 打包契约', () => {
       'Windows installer',
       isWindowsNsisInstallerName,
     )).toThrow('版本不一致')
+  })
+
+  it('便携 ZIP 使用严格版本 token，拒绝旧版本、相近版本与多候选', () => {
+    const names = [
+      'DeepShell.Agent_0.1.3_x64-portable.zip',
+      'DeepShell.Agent_0.1.40_x64-portable.zip',
+      'DeepShell.Agent_0.1.4_x64-portable.zip',
+      'DeepShell Agent_0.1.4_arm64-portable.zip',
+      'Other_0.1.4_x64-portable.zip',
+    ]
+    expect(isWindowsPortableZipName(names[2], '0.1.4')).toBe(true)
+    expect(isWindowsPortableZipName('DeepShell Agent_0.1.4_x64-portable.zip', '0.1.4')).toBe(true)
+    expect(isWindowsPortableZipName(names[0], '0.1.4')).toBe(false)
+    expect(isWindowsPortableZipName(names[1], '0.1.4')).toBe(false)
+    expect(isWindowsPortableZipName(names[3], '0.1.4')).toBe(false)
+    expect(isWindowsPortableZipName(names[4], '0.1.4')).toBe(false)
+    expect(selectWindowsPortableZipName([names[2]], '0.1.4')).toBe(names[2])
+    expect(selectWindowsPortableZipName([names[0], names[1], names[3], names[4]], '0.1.4')).toBeNull()
+    expect(() => selectWindowsPortableZipName([names[2], 'DeepShell Agent_0.1.4_x64-portable.zip'], '0.1.4'))
+      .toThrow('存在多个候选')
+    expect(() => assertArtifactNameMatchesVersion(names[0], '0.1.4', 'Windows portable ZIP', isWindowsPortableZipName))
+      .toThrow('版本不一致')
+  })
+
+  it('便携 staging 布局与 allowlist 目标路径约束', () => {
+    const entries = ['DeepShell Agent.exe', 'runtime', 'LICENSE', 'README-portable.txt']
+    expect(() => assertPortableLayout(entries)).not.toThrow()
+    expect(() => assertPortableLayout([...entries, 'extra.txt'])).toThrow('顶层条目不符合便携布局')
+    expect(() => assertPortableLayout(['DeepShell Agent.exe', 'runtime', 'LICENSE'])).toThrow('顶层条目不符合便携布局')
+    for (const entry of portableAllowlist) {
+      expect(() => assertPortableTargetPath(entry.target)).not.toThrow()
+    }
+    for (const invalid of ['../escape', '/absolute', 'C:/windows', 'runtime/../escape', 'runtime//empty']) {
+      expect(() => assertPortableTargetPath(invalid)).toThrow('不合法')
+    }
+  })
+
+  it('便携 staging 基准必须位于 runtime/staging/portable-v<version>', () => {
+    const version = '0.1.4'
+    const paths = portablePaths(workspace, version)
+    expect(paths.stagingPath).toBe(resolve(workspace, 'runtime/staging', `portable-v${version}`, 'staging', 'DeepShell Agent'))
+    expect(paths.archivePath).toBe(
+      resolve(workspace, 'src-tauri/target/release/bundle/portable', `DeepShell.Agent_${version}_x64-portable.zip`),
+    )
+    expect(() => assertSafePortableStageBase(paths.stageBase, workspace)).not.toThrow()
+    expect(() => assertSafePortableStageBase(resolve(workspace), workspace)).toThrow('受保护目录')
+    expect(() => assertSafePortableStageBase(resolve(workspace, 'runtime/staging'), workspace)).toThrow('受保护目录')
+    expect(() => assertSafePortableStageBase(resolve(workspace, 'outside', `portable-v${version}`), workspace))
+      .toThrow('运行时 staging 目录内')
+    expect(() => assertSafePortableStageBase(resolve(workspace, 'runtime/staging', 'random'), workspace))
+      .toThrow('portable-v<version>')
   })
 
   it('macOS DMG 也使用严格版本 token，避免 0.1.4 命中 0.1.40', () => {

@@ -91,14 +91,16 @@ if (process.platform === 'darwin') {
   }
   console.log(JSON.stringify(result))
 } else if (process.platform === 'win32') {
-  const [installedTreeManifest, nsisManifest] = await Promise.all([
+  const [installedTreeManifest, nsisManifest, portableManifest] = await Promise.all([
     readJson(resolve(root, 'runtime/staging/package-release-win32-x64-windows-installed-tree.json')),
     readJson(resolve(root, 'runtime/staging/package-release-win32-x64-nsis-installer.json')),
+    readJson(resolve(root, 'runtime/staging/package-release-win32-x64-windows-portable.json')),
   ])
   validatePackageManifestV5(installedTreeManifest)
   validatePackageManifestV5(nsisManifest)
+  validatePackageManifestV5(portableManifest)
   const currentSourceInput = await platformInputDigest(root, 'win32-x64')
-  for (const manifest of [installedTreeManifest, nsisManifest]) {
+  for (const manifest of [installedTreeManifest, nsisManifest, portableManifest]) {
     if (manifest.platform !== 'win32-x64') {
       throw new Error('Windows size gate 要求当前平台的 schemaVersion 5 manifest')
     }
@@ -110,7 +112,8 @@ if (process.platform === 'darwin') {
     }
   }
   if (installedTreeManifest.artifactKind !== 'windows-installed-tree' ||
-      nsisManifest.artifactKind !== 'nsis-installer') {
+      nsisManifest.artifactKind !== 'nsis-installer' ||
+      portableManifest.artifactKind !== 'windows-portable') {
     throw new Error('Windows size gate 收到了错误的 artifactKind')
   }
   const installedTree = inspection(installedTreeManifest, 'windows-installed-tree', 'exact-installed-tree')
@@ -118,6 +121,15 @@ if (process.platform === 'darwin') {
   inspection(installedTreeManifest, 'runtime-dsh', 'exact-artifact-tree')
   inspection(installedTreeManifest, 'profile-template', 'exact-artifact-tree')
   const nsis = inspection(nsisManifest, 'nsis-installer', 'file-metadata-only')
+  // portable 为首版：只校验结构与 staging/extracted 一致性，不与 v0.1.3 比较（REQ-1408）。
+  const portableStaging = inspection(portableManifest, 'staging', 'exact-artifact-tree')
+  const portableArchive = inspection(portableManifest, 'archive', 'file-metadata-only')
+  const portableExtracted = inspection(portableManifest, 'extracted', 'archive-extracted-tree')
+  if (portableStaging.contentSha256 !== portableExtracted.contentSha256 ||
+      portableStaging.size.bytes !== portableExtracted.size.bytes ||
+      portableStaging.size.files !== portableExtracted.size.files) {
+    throw new Error('portable staging 与 extracted 清单不一致，必须重建')
+  }
 
   // 可选一致性核对：传入实际安装树路径时，重新测量并要求与 manifest 完全一致
   // （防止清单过期；不传则只做 manifest-vs-baseline 门禁）。
@@ -133,7 +145,7 @@ if (process.platform === 'darwin') {
 
   const platformMatch = path => path.match(/(^|\/)runtime\/node\/([^/]+)(\/|$)/)
   const foreignRuntimePaths = new Set()
-  for (const manifest of [installedTreeManifest, nsisManifest]) {
+  for (const manifest of [installedTreeManifest, nsisManifest, portableManifest]) {
     for (const inspectionEntry of manifest.inspections) {
       for (const resource of inspectionEntry.resources) {
         const match = platformMatch(resource.path)
@@ -158,6 +170,12 @@ if (process.platform === 'darwin') {
       baseline.artifacts.windowsNsis,
       'Windows NSIS',
     ),
+    windowsPortable: {
+      status: 'recorded-first-version',
+      staging: { bytes: portableStaging.size.bytes, files: portableStaging.size.files, contentSha256: portableStaging.contentSha256 },
+      archive: { bytes: portableArchive.size.bytes, sha256: portableArchive.sha256 },
+      extracted: { bytes: portableExtracted.size.bytes, files: portableExtracted.size.files, contentSha256: portableExtracted.contentSha256 },
+    },
   }
   console.log(JSON.stringify(result))
 } else {

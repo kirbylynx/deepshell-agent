@@ -7,8 +7,10 @@ export function uniqueMatchingArtifact(
 export function artifactVersionPattern(version: string): RegExp
 export function artifactNameMatchesVersion(name: string, version: string): boolean
 export function isWindowsNsisInstallerName(name: string, version: string): boolean
+export function isWindowsPortableZipName(name: string, version: string): boolean
 export function isMacosDmgName(name: string, version: string): boolean
 export function selectWindowsNsisInstallerName(names: string[], version: string, label?: string): string | null
+export function selectWindowsPortableZipName(names: string[], version: string, label?: string): string | null
 export function selectMacosDmgName(names: string[], version: string, label?: string): string | null
 export function assertArtifactNameMatchesVersion(
   name: string,

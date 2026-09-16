@@ -22,12 +22,20 @@ export function isWindowsNsisInstallerName(name, version) {
   return new RegExp(`^${productNamePattern}_${escapedRegex(version)}_x64-setup\\.exe$`).test(name)
 }
 
+export function isWindowsPortableZipName(name, version) {
+  return new RegExp(`^${productNamePattern}_${escapedRegex(version)}_x64-portable\\.zip$`).test(name)
+}
+
 export function isMacosDmgName(name, version) {
   return new RegExp(`^${productNamePattern}_${escapedRegex(version)}_aarch64\\.dmg$`).test(name)
 }
 
 export function selectWindowsNsisInstallerName(names, version, label = `Windows ${version} installer`) {
   return uniqueMatchingArtifact(names, name => isWindowsNsisInstallerName(name, version), label)
+}
+
+export function selectWindowsPortableZipName(names, version, label = `Windows ${version} portable ZIP`) {
+  return uniqueMatchingArtifact(names, name => isWindowsPortableZipName(name, version), label)
 }
 
 export function selectMacosDmgName(names, version, label = `macOS ${version} DMG`) {

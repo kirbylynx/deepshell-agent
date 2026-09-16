@@ -119,7 +119,9 @@ export const platformSourceInputs = {
   'win32-x64': [
     ...currentSharedSourceInputs,
     'src-tauri/tauri.windows.conf.json',
+    'scripts/create-windows-portable.mjs',
     'scripts/verify-windows-route.mjs',
+    'packaging/windows/README-portable.txt',
     '.github/workflows/windows-release.yml',
   ],
 }

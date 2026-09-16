@@ -139,6 +139,7 @@ describe('v0.1.1 release hardening scripts', () => {
         '--license-inventory', support,
         '--package-manifest', 'none',
         '--dmg-manifest', 'none',
+        '--portable-manifest', 'none',
         '--allow-missing-release-manifests'
       ])
       await expect(access(staleReleaseReport)).rejects.toThrow()
@@ -150,6 +151,7 @@ describe('v0.1.1 release hardening scripts', () => {
         '--output-dir', output,
         '--dmg', dmg,
         '--windows-installer', windowsInstaller,
+        '--windows-portable-dir', resolve(temporary, 'portable-empty'),
         '--license-inventory', support,
         '--sbom', support,
         '--security-audit', support
@@ -192,6 +194,7 @@ describe('v0.1.1 release hardening scripts', () => {
         '--output-dir', output,
         '--dmg', dmg,
         '--windows-installer', windowsInstaller,
+        '--windows-portable-dir', resolve(temporary, 'portable-empty'),
         '--license-inventory', license,
         '--sbom', sbom,
         '--package-report', report,
@@ -246,6 +249,7 @@ describe('v0.1.1 release hardening scripts', () => {
         '--output-dir', output,
         '--dmg', dmg,
         '--windows-installer', windowsInstaller,
+        '--windows-portable-dir', resolve(temporary, 'portable-empty'),
         '--license-inventory', license,
         '--sbom', sbom,
         '--package-report', license,
@@ -263,6 +267,7 @@ describe('v0.1.1 release hardening scripts', () => {
         '--output-dir', output,
         '--dmg-dir', emptyDmgDirectory,
         '--windows-installer-dir', emptyInstallerDirectory,
+        '--windows-portable-dir', resolve(temporary, 'portable-empty'),
         '--license-inventory', license,
         '--sbom', sbom,
         '--security-audit', security
@@ -377,7 +382,8 @@ describe('v0.1.1 release hardening scripts', () => {
         '--sbom', good,
         '--package-report', good,
         '--security-audit', good,
-        '--windows-installer-dir', resolve(temporary, 'empty-nsis')
+        '--windows-installer-dir', resolve(temporary, 'empty-nsis'),
+        '--windows-portable-dir', resolve(temporary, 'empty-portable')
       ])
       await writeFile(resolve(output, 'KEEP.txt'), 'old-snapshot')
 
@@ -390,7 +396,8 @@ describe('v0.1.1 release hardening scripts', () => {
         '--sbom', good,
         '--package-report', good,
         '--security-audit', good,
-        '--windows-installer-dir', resolve(temporary, 'empty-nsis')
+        '--windows-installer-dir', resolve(temporary, 'empty-nsis'),
+        '--windows-portable-dir', resolve(temporary, 'empty-portable')
       ])).rejects.toThrow()
 
       expect(await readFile(resolve(output, 'KEEP.txt'), 'utf8')).toBe('old-snapshot')
@@ -419,6 +426,7 @@ describe('v0.1.1 release hardening scripts', () => {
         '--version', '0.1.4',
         '--output-dir', output,
         '--dmg', dmg,
+        '--windows-portable-dir', resolve(temporary, 'portable-empty'),
         '--license-inventory', license,
         '--sbom', sbom,
         '--package-report', report
@@ -440,6 +448,63 @@ describe('v0.1.1 release hardening scripts', () => {
         '--version', '0.1.4',
         '--output-dir', output,
         '--windows-installer', wrongInstaller,
+      ])).rejects.toThrow(/版本不一致/)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('release staging 复制 windows-portable 资产并写入校验和', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-portable-'))
+    try {
+      const dmgDirectory = resolve(temporary, 'dmg')
+      const installerDirectory = resolve(temporary, 'nsis')
+      const output = resolve(temporary, 'release')
+      const support = resolve(temporary, 'good.json')
+      const portable = resolve(temporary, 'DeepShell.Agent_0.1.4_x64-portable.zip')
+      await mkdir(dmgDirectory)
+      await mkdir(installerDirectory)
+      await writeFile(support, '{"application":{"version":"0.1.4"}}\n')
+      await writeFile(portable, 'portable-bytes')
+
+      await runNode([
+        'scripts/release-staging.mjs',
+        '--version', '0.1.4',
+        '--output-dir', output,
+        '--dmg-dir', dmgDirectory,
+        '--windows-installer-dir', installerDirectory,
+        '--windows-portable', portable,
+        '--license-inventory', support,
+        '--sbom', support,
+        '--package-report', support,
+        '--security-audit', support
+      ])
+
+      const manifest = JSON.parse(await readFile(resolve(output, 'release-manifest.json'), 'utf8'))
+      const portableAsset = manifest.assets.find((asset: { label: string }) => asset.label === 'windows-portable')
+      expect(portableAsset.status).toBe('present')
+      expect(portableAsset.asset).toBe('DeepShell.Agent_0.1.4_x64-portable.zip')
+      expect(await readFile(resolve(output, 'DeepShell.Agent_0.1.4_x64-portable.zip'), 'utf8')).toBe('portable-bytes')
+      const sums = await readFile(resolve(output, 'SHA256SUMS.txt'), 'utf8')
+      expect(sums).toContain('DeepShell.Agent_0.1.4_x64-portable.zip')
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('release staging 拒绝显式传入旧版本 portable ZIP', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-portable-old-'))
+    try {
+      const portable = resolve(temporary, 'DeepShell.Agent_0.1.3_x64-portable.zip')
+      await writeFile(portable, 'old-portable')
+
+      await expect(runNode([
+        'scripts/release-staging.mjs',
+        '--version', '0.1.4',
+        '--output-dir', resolve(temporary, 'release'),
+        '--dmg-dir', resolve(temporary, 'dmg'),
+        '--windows-installer-dir', resolve(temporary, 'nsis'),
+        '--windows-portable', portable,
       ])).rejects.toThrow(/版本不一致/)
     } finally {
       await rm(temporary, { recursive: true, force: true })
@@ -500,6 +565,7 @@ describe('v0.1.1 release hardening scripts', () => {
         '--output-dir', output,
         '--dmg-dir', dmgDirectory,
         '--windows-installer', windowsInstaller,
+        '--windows-portable-dir', resolve(temporary, 'portable-empty'),
         '--license-inventory', license,
         '--sbom', sbom,
         '--package-report', report,

@@ -9,8 +9,10 @@ import {
   assertArtifactNameMatchesVersion,
   isMacosDmgName,
   isWindowsNsisInstallerName,
+  isWindowsPortableZipName,
   selectMacosDmgName,
   selectWindowsNsisInstallerName,
+  selectWindowsPortableZipName,
 } from './lib/artifact-selection.mjs'
 
 function argValue(name, fallback) {
@@ -106,6 +108,17 @@ async function currentWindowsInstaller(version) {
   )
 }
 
+async function currentWindowsPortable(version) {
+  const directory = resolve(argValue('--windows-portable-dir', resolve(root, 'src-tauri/target/release/bundle/portable')))
+  return matchingAsset(
+    directory,
+    version,
+    selectWindowsPortableZipName,
+    '.zip',
+    file => file.toLowerCase().endsWith('-portable.zip'),
+  )
+}
+
 async function copyJsonIfPresent(source, target, assets, label, version) {
   if (!await exists(source)) {
     assets.push({ label, status: 'missing', asset: basename(target) })
@@ -160,6 +173,10 @@ async function writeReleaseStaging(version, outputDirectory, stagingDirectory) {
   const windowsInstaller = windowsInstallerArg === undefined
     ? await currentWindowsInstaller(version)
     : { status: 'present', path: resolve(windowsInstallerArg) }
+  const windowsPortableArg = argValue('--windows-portable', undefined)
+  const windowsPortable = windowsPortableArg === undefined
+    ? await currentWindowsPortable(version)
+    : { status: 'present', path: resolve(windowsPortableArg) }
   if (dmg.status === 'missing') {
     assets.push({ label: 'macos-dmg', status: 'missing', asset: `DeepShell.Agent_${version}_aarch64.dmg` })
   } else {
@@ -175,6 +192,14 @@ async function writeReleaseStaging(version, outputDirectory, stagingDirectory) {
     const target = resolve(stagingDirectory, `DeepShell.Agent_${version}_x64-setup.exe`)
     await copyFile(windowsInstaller.path, target)
     assets.push({ label: 'windows-nsis', status: 'present', asset: basename(target), sha256: await sha256(target) })
+  }
+  if (windowsPortable.status === 'missing') {
+    assets.push({ label: 'windows-portable', status: 'missing', asset: `DeepShell.Agent_${version}_x64-portable.zip` })
+  } else {
+    assertArtifactNameMatchesVersion(basename(windowsPortable.path), version, 'Windows portable ZIP', isWindowsPortableZipName)
+    const target = resolve(stagingDirectory, basename(windowsPortable.path))
+    await copyFile(windowsPortable.path, target)
+    assets.push({ label: 'windows-portable', status: 'present', asset: basename(target), sha256: await sha256(target) })
   }
   await copyJsonIfPresent(
     resolve(argValue('--license-inventory', resolve(root, 'runtime/staging/license-inventory.json'))),
@@ -243,7 +268,7 @@ export async function runReleaseStaging() {
   const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
   const version = argValue('--version', pkg.version)
   const outputDirectory = resolve(argValue('--output-dir', resolve(root, 'runtime/staging', `release-v${version}`)))
-  for (const option of ['--dmg', '--windows-installer', '--license-inventory', '--sbom', '--package-report', '--security-audit']) {
+  for (const option of ['--dmg', '--windows-installer', '--windows-portable', '--license-inventory', '--sbom', '--package-report', '--security-audit']) {
     assertExplicitInputOutsideOutput(option, outputDirectory)
   }
   await assertOutputDirectoryMayBeReplaced(version, outputDirectory)

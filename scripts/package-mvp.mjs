@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { root } from './lib/runtime.mjs'
 import { packageCommandPlan } from './lib/process-plan.mjs'
+import { portablePaths } from './create-windows-portable.mjs'
 
 // Windows 上 pnpm 是 `pnpm.cmd` 批处理，而 Node 出于安全考虑（CVE-2024-27980）
 // 拒绝在未启用 shell 时直接启动 `.cmd`/`.bat` → `spawn EINVAL`。
@@ -45,6 +46,15 @@ if (process.platform === 'darwin') {
   // Windows 无代码签名（REL-008 未做），故不调用 sign-package.mjs（其硬编码 /usr/bin/codesign）。
   await run('node', ['scripts/verify-package.mjs', 'release'])
   await run('node', ['scripts/capture-package-manifest.mjs', 'release', 'nsis-installer'])
+  // 免安装 ZIP：从同一 release binary 生成 allowlist staging 与 ZIP，解压复验后捕获清单。
+  await run('node', ['scripts/create-windows-portable.mjs'])
+  const portable = portablePaths(root, pkg.version)
+  await run('node', [
+    'scripts/capture-package-manifest.mjs', 'release', 'windows-portable',
+    '--staging', portable.stagingPath,
+    '--archive', portable.archivePath,
+    '--extracted', portable.extractedPath,
+  ])
   // 不加 --require-artifacts：Windows 侧没有 E2E 产物清单（`.app` + WDIO 链路仅 macOS），
   // 只做静态安全边界比较；若同时存在另一平台清单，compare 脚本会按平台校验拒绝比较。
   await run('node', ['scripts/compare-e2e-release.mjs'])

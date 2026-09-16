@@ -17,15 +17,28 @@ const requestedKind = process.argv[3]
 if (!['e2e', 'release'].includes(mode)) {
   throw new Error('用法：capture-package-manifest.mjs <e2e|release> [artifact-kind]')
 }
-const installedTreeArgumentIndex = process.argv.indexOf('--installed-tree')
-const installedTreeArgument = installedTreeArgumentIndex >= 0 ? process.argv[installedTreeArgumentIndex + 1] : undefined
+const argumentValue = name => {
+  const index = process.argv.indexOf(name)
+  return index >= 0 ? process.argv[index + 1] : undefined
+}
+const installedTreeArgument = argumentValue('--installed-tree')
 if (requestedKind === 'windows-installed-tree' && !installedTreeArgument) {
   throw new Error('用法：capture-package-manifest.mjs <e2e|release> windows-installed-tree --installed-tree <path>')
+}
+const stagingArgument = argumentValue('--staging')
+const archiveArgument = argumentValue('--archive')
+const extractedArgument = argumentValue('--extracted')
+if (requestedKind === 'windows-portable' && (!stagingArgument || !archiveArgument || !extractedArgument)) {
+  throw new Error('用法：capture-package-manifest.mjs <e2e|release> windows-portable --staging <path> --archive <path> --extracted <path>')
 }
 
 const lock = await readLock()
 const rootPackage = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
-const adapterOptions = requestedKind === 'windows-installed-tree' ? { artifactPath: installedTreeArgument } : undefined
+const adapterOptions = requestedKind === 'windows-installed-tree'
+  ? { artifactPath: installedTreeArgument }
+  : requestedKind === 'windows-portable'
+    ? { stagingPath: stagingArgument, archivePath: archiveArgument, extractedPath: extractedArgument }
+    : undefined
 const adapter = packageAdapter(process.platform, lock, requestedKind, adapterOptions)
 await requireArtifactReady(adapter, access)
 await access(adapter.resourcesRoot)
@@ -200,6 +213,63 @@ if (adapter.platform === 'darwin') {
     runtimePlatforms: runtimePlatforms(treeManifest.entries),
     size: { bytes: treeManifest.bytes, files: treeManifest.files },
     contentSha256: treeManifest.contentSha256,
+  })
+} else if (adapter.artifactKind === 'windows-portable') {
+  // 免安装 ZIP：staging 与解压树都必须与已验证源子树等价，且二者互相等价（设计 §4.4）。
+  const staging = adapter.primaryTreePath
+  const extracted = adapter.extractedPath
+  const mappings = [
+    ['runtime-node', resolve(root, 'runtime/node/win32-x64'), 'runtime/node/win32-x64', ['win32-x64']],
+    ['runtime-dsh', resolve(root, 'runtime/dsh'), 'runtime/dsh', []],
+    ['profile-template', resolve(root, 'runtime/profile-template'), 'runtime/profile-template', []],
+  ]
+  for (const [subject, source, relativePath, subjectRuntimePlatforms] of mappings) {
+    const stagingEquivalence = await assertEquivalentTrees(source, resolve(staging, relativePath), `portable staging ${subject}`)
+    await assertEquivalentTrees(source, resolve(extracted, relativePath), `portable extracted ${subject}`)
+    inspections.push({
+      subject,
+      inspectionMode: 'exact-artifact-tree',
+      status: 'equivalent',
+      resources: stagingEquivalence.target.entries,
+      runtimePlatforms: subjectRuntimePlatforms,
+      size: { bytes: stagingEquivalence.target.bytes, files: stagingEquivalence.target.files },
+      contentSha256: stagingEquivalence.target.contentSha256,
+    })
+  }
+  const { source: stagingManifest, target: extractedManifest } = await assertEquivalentTrees(staging, extracted, 'portable staging/extracted')
+  const platformMatch = path => path.match(/(^|\/)runtime\/node\/([^/]+)(\/|$)/)
+  const foreignRuntime = stagingManifest.entries.find(entry => {
+    const match = platformMatch(entry.path)
+    return match !== null && match[2] !== 'win32-x64'
+  })
+  if (foreignRuntime) throw new Error(`Windows portable staging 包含异平台 Runtime：${foreignRuntime.path}`)
+  inspections.push({
+    subject: 'staging',
+    inspectionMode: 'exact-artifact-tree',
+    status: 'present',
+    resources: stagingManifest.entries,
+    runtimePlatforms: runtimePlatforms(stagingManifest.entries),
+    size: { bytes: stagingManifest.bytes, files: stagingManifest.files },
+    contentSha256: stagingManifest.contentSha256,
+  })
+  const archiveContent = await readFile(adapter.artifactPath)
+  inspections.push({
+    subject: 'archive',
+    inspectionMode: 'file-metadata-only',
+    status: 'present',
+    resources: [{ path: basename(adapter.artifactPath), bytes: archiveContent.length, sha256: digest(archiveContent) }],
+    runtimePlatforms: [],
+    size: { bytes: (await stat(adapter.artifactPath)).size, files: 1 },
+    sha256: digest(archiveContent),
+  })
+  inspections.push({
+    subject: 'extracted',
+    inspectionMode: 'archive-extracted-tree',
+    status: 'equivalent',
+    resources: extractedManifest.entries,
+    runtimePlatforms: runtimePlatforms(extractedManifest.entries),
+    size: { bytes: extractedManifest.bytes, files: extractedManifest.files },
+    contentSha256: extractedManifest.contentSha256,
   })
 }
 
