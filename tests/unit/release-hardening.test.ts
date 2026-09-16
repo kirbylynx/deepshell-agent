@@ -598,6 +598,14 @@ describe('v0.1.1 release hardening scripts', () => {
         await access(resolve(root, recorded.record))
       }
 
+      // 当前版本同样必须已登记，且记录路径真实存在（验收事实在 W6 完成时登记）。
+      const current = acceptanceFor('0.1.4')
+      expect(current.recorded).toBe(true)
+      if (current.recorded) {
+        expect(current.record).toContain('0.1.4')
+        await access(resolve(root, current.record))
+      }
+
       // ④ 针对 F-002：状态码必须是**已知枚举**，不得退化为自由文本。
       //    任何新状态都必须先加入 WindowsStatusCode，从而强制一次有意识的契约变更。
       const accepted = windowsManifestFields('0.1.3')

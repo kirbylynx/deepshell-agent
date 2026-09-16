@@ -73,6 +73,16 @@ export const windowsAcceptance = {
       { id: 'REL-027', summary: 'dead client renderer' },
       { id: 'DESK-023', summary: 'Windows menu' }
     ]
+  },
+  '0.1.4': {
+    record: 'docs/releases/v0.1.4.md',
+    scope:
+      'WIN-01 to WIN-13 measured on real Windows 11 x64: per-platform runtime trimming (installed tree -196570267 bytes / -4800 files; NSIS -27580165 bytes), portable ZIP distribution, native File/Help menu, exit-path hardening, and the pre-uninstall cleanup whose end-to-end matrix removes the install tree completely even with an orphan Sidecar; session creation and UI-level data sharing remain manual items',
+    unfixed: [
+      { id: 'REL-025', summary: 'quarantined-record retirement on macOS (Windows side landed)' },
+      { id: 'REL-026', summary: 'drag-and-drop' },
+      { id: 'REL-027', summary: 'dead client renderer' }
+    ]
   }
 }
 
