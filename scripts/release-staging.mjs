@@ -262,12 +262,19 @@ async function writeReleaseStaging(version, outputDirectory, stagingDirectory) {
     // 因此两处不可能出现"版本与验收结论不一致"。未登记的版本会如实输出"无验收记录"。
     ...windowsManifestFields(version)
   }))
+  return assets
 }
 
 export async function runReleaseStaging() {
   const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
   const version = argValue('--version', pkg.version)
   const outputDirectory = resolve(argValue('--output-dir', resolve(root, 'runtime/staging', `release-v${version}`)))
+  // `--require-assets macos-dmg,windows-nsis,windows-portable`：combined release staging
+  // 必须齐全的场景（macOS 收口）用它在替换 output 之前显式失败。
+  const requiredAssets = (argValue('--require-assets', '') || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean)
   for (const option of ['--dmg', '--windows-installer', '--windows-portable', '--license-inventory', '--sbom', '--package-report', '--security-audit']) {
     assertExplicitInputOutsideOutput(option, outputDirectory)
   }
@@ -275,7 +282,13 @@ export async function runReleaseStaging() {
   await mkdir(dirname(outputDirectory), { recursive: true })
   let stagingDirectory = await mkdtemp(resolve(dirname(outputDirectory), `.${basename(outputDirectory)}-tmp-`))
   try {
-    await writeReleaseStaging(version, outputDirectory, stagingDirectory)
+    const assets = await writeReleaseStaging(version, outputDirectory, stagingDirectory)
+    for (const label of requiredAssets) {
+      const asset = assets.find(item => item.label === label)
+      if (!asset || asset.status !== 'present') {
+        throw new Error(`release staging 要求 ${label} 资产存在，但状态为 ${asset?.status ?? 'missing'}`)
+      }
+    }
     await replaceDirectory(stagingDirectory, outputDirectory)
     stagingDirectory = null
   } finally {

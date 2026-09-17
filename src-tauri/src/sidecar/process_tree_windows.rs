@@ -4,7 +4,7 @@ use std::os::windows::process::CommandExt;
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::{Child, Command},
+    process::{Child, Command, Stdio},
     sync::atomic::{AtomicBool, Ordering},
     thread,
     time::{Duration, Instant},
@@ -57,7 +57,12 @@ pub fn register(
     instance_id: &str,
 ) -> Result<(), AppError> {
     let expected = fs::canonicalize(expected_executable).map_err(runtime_stop_error)?;
-    verify_executable_if_available(pid, &expected)?;
+    if verify_executable_if_available(pid, &expected) == ExecutableMatch::Mismatch {
+        return Err(AppError::new(
+            ErrorCode::RuntimeStartFailed,
+            "Sidecar 主进程路径与预期不符；拒绝登记 ownership registry",
+        ));
+    }
     write_registry(
         path,
         &OwnershipRegistry {
@@ -111,15 +116,33 @@ pub fn recover_registered(
         // （真机验收实测：残留的 quarantined 记录让应用每次启动都直接失败，
         //  且日志只有 `runtime_stop_failed` 一个代号，完全看不出原因。）
         let _ = quarantine_record(path, &mut record);
-        if !process_alive(record.leader_pid) {
-            return unregister(path);
-        }
-        return Err(AppError::new(
-            ErrorCode::RuntimeStopFailed,
-            "ownership registry 的 Sidecar executable 不属于当前应用，且登记的进程仍存活；拒绝误杀",
-        ));
+        return match process_state(record.leader_pid) {
+            ProcessState::Dead => unregister(path),
+            ProcessState::Alive => Err(AppError::new(
+                ErrorCode::RuntimeStopFailed,
+                "ownership registry 的 Sidecar executable 不属于当前应用，且登记的进程仍存活；拒绝误杀",
+            )),
+            ProcessState::Unknown => Err(AppError::new(
+                ErrorCode::RuntimeStopFailed,
+                "ownership registry 的 Sidecar executable 不属于当前应用，且无法确认登记进程状态；拒绝误杀",
+            )),
+        };
     }
-    verify_executable_if_available(record.leader_pid, &expected)?;
+    match verify_executable_if_available(record.leader_pid, &expected) {
+        ExecutableMatch::Matches => {}
+        ExecutableMatch::Mismatch => {
+            return Err(AppError::new(
+                ErrorCode::RuntimeStopFailed,
+                "ownership registry 的 Sidecar 主进程路径不匹配（可能已被 PID 复用）；拒绝误杀",
+            ))
+        }
+        ExecutableMatch::Unavailable => {
+            return Err(AppError::new(
+                ErrorCode::RuntimeStopFailed,
+                "无法校验 ownership registry 的进程身份；拒绝在未知状态下清理",
+            ))
+        }
+    }
     mark_cleaning(path, &mut record)?;
     terminate_registered(path, None, deadline, abort_on_shutdown)?;
     unregister(path)
@@ -167,8 +190,25 @@ pub fn retry_cleanup(path: &Path, expected_executable: &Path) -> Result<(), AppE
             ),
         );
     }
-    verify_executable_if_available(record.leader_pid, &expected)?;
-    mark_cleaning(path, &mut record)
+    match verify_executable_if_available(record.leader_pid, &expected) {
+        ExecutableMatch::Matches => mark_cleaning(path, &mut record),
+        ExecutableMatch::Mismatch => quarantine(
+            path,
+            &mut record,
+            AppError::new(
+                ErrorCode::RuntimeStopFailed,
+                "quarantine 主进程路径不匹配（可能已被 PID 复用）；拒绝误杀",
+            ),
+        ),
+        ExecutableMatch::Unavailable => quarantine(
+            path,
+            &mut record,
+            AppError::new(
+                ErrorCode::RuntimeStopFailed,
+                "无法校验 quarantine 主进程身份；拒绝在未知状态下清理",
+            ),
+        ),
+    }
 }
 
 pub fn quarantine_registered(path: &Path) -> Result<(), AppError> {
@@ -215,18 +255,25 @@ fn terminate_pid_tree(
     deadline: Instant,
     abort_on_shutdown: Option<&AtomicBool>,
 ) -> Result<(), AppError> {
-    // 幂等：leader 已经不在时无需终止（例如进程在进入清理流程前自行退出）。
-    // 必须先于 taskkill 判断，否则"对已不存在的 PID 调用 taskkill 返回非零"会被误判为清理故障。
-    if !leader_alive(pid, &mut child)? {
-        return Ok(());
+    // 幂等与三态：只有**确认已退出**才算幂等成功；"无法确认"必须失败关闭。
+    // 此前把存活查询失败当作"已退出"直接返回成功，可能漏清理却表现为成功。
+    match leader_state(pid, &mut child)? {
+        ProcessState::Dead => return Ok(()),
+        ProcessState::Alive => {}
+        ProcessState::Unknown => {
+            return Err(AppError::new(
+                ErrorCode::RuntimeStopFailed,
+                "无法确认 Sidecar 主进程状态（进程查询不可用）；拒绝在未知状态下继续",
+            ))
+        }
     }
     // 首选系统级进程树终止，并**保留**结果用于失败判定与诊断：
     // 此前 `let _ = ...output()` 完全吞掉 taskkill 的退出码与 stderr，只要 leader 恰好在
     // 等待窗口内退出就会把"未能确认整棵树已终止"误报为成功（REL-024 语义要求
     // 返回成功前必须确认受管进程树已退出）。
-    let taskkill = console_command("taskkill")
-        .args(["/PID", &pid.to_string(), "/T", "/F"])
-        .output();
+    let mut taskkill_command = console_command("taskkill");
+    taskkill_command.args(["/PID", &pid.to_string(), "/T", "/F"]);
+    let taskkill = run_command_with_timeout(&mut taskkill_command, Duration::from_secs(15));
     let taskkill_failure = match &taskkill {
         Ok(output) if output.status.success() => None,
         Ok(output) => Some(format!(
@@ -242,15 +289,15 @@ fn terminate_pid_tree(
         if let Some(process) = child.as_deref_mut() {
             let _ = process.kill();
         }
-        let _ = console_command("powershell.exe")
-            .args([
-                "-NoProfile",
-                "-ExecutionPolicy",
-                "Bypass",
-                "-Command",
-                &format!("Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue"),
-            ])
-            .status();
+        let mut stop = console_command("powershell.exe");
+        stop.args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            &format!("Stop-Process -Id {pid} -Force -ErrorAction SilentlyContinue"),
+        ]);
+        let _ = run_command_with_timeout(&mut stop, Duration::from_secs(5));
     }
     while Instant::now() < deadline {
         if abort_on_shutdown.is_some_and(|intent| intent.load(Ordering::SeqCst)) {
@@ -259,18 +306,27 @@ fn terminate_pid_tree(
                 "旧 Runtime 恢复清理已交由退出流程接管",
             ));
         }
-        if !leader_alive(pid, &mut child)? {
-            return match taskkill_failure {
-                None => Ok(()),
-                Some(summary) => Err(AppError::new(
+        match leader_state(pid, &mut child)? {
+            ProcessState::Dead => {
+                return match taskkill_failure {
+                    None => Ok(()),
+                    Some(summary) => Err(AppError::new(
+                        ErrorCode::RuntimeStopFailed,
+                        format!(
+                            "Sidecar 主进程已退出，但无法确认进程树已完整终止（{summary}）；请重试退出或恢复"
+                        ),
+                    )),
+                };
+            }
+            ProcessState::Alive => {}
+            ProcessState::Unknown => {
+                return Err(AppError::new(
                     ErrorCode::RuntimeStopFailed,
-                    format!(
-                        "Sidecar 主进程已退出，但无法确认进程树已完整终止（{summary}）；请重试退出或恢复"
-                    ),
-                )),
-            };
+                    "无法确认 Sidecar 主进程是否已退出（进程查询不可用）；请重试退出或恢复",
+                ))
+            }
         }
-        thread::sleep(Duration::from_millis(50));
+        thread::sleep(Duration::from_millis(100));
     }
     let suffix = taskkill_failure
         .map(|summary| format!("；taskkill：{summary}"))
@@ -281,11 +337,17 @@ fn terminate_pid_tree(
     ))
 }
 
-fn leader_alive(pid: u32, child: &mut Option<&mut Child>) -> Result<bool, AppError> {
+fn leader_state(pid: u32, child: &mut Option<&mut Child>) -> Result<ProcessState, AppError> {
     if let Some(process) = child.as_deref_mut() {
-        return Ok(process.try_wait().map_err(runtime_stop_error)?.is_none());
+        return Ok(
+            if process.try_wait().map_err(runtime_stop_error)?.is_none() {
+                ProcessState::Alive
+            } else {
+                ProcessState::Dead
+            },
+        );
     }
-    Ok(process_alive(pid))
+    Ok(process_state(pid))
 }
 
 /// 卸载兜底清理的可机器判定结果（NSIS PREUNINSTALL hook 依赖）。
@@ -348,19 +410,46 @@ pub fn cleanup_for_uninstall(
     let mut terminated = Vec::new();
     let registry_path = app_data_root.join("runtime-state").join("ownership.json");
 
-    // 2. ownership record：只处理属于当前安装的记录。
+    // 2. ownership record：只处理**可验证属于当前安装且状态为 active**的记录。
     match read_registry(&registry_path) {
-        Ok(Some(record)) => {
-            let record_target = fs::canonicalize(&record.expected_executable).ok();
-            if record_target.as_deref() == Some(expected_node.as_path()) {
-                if process_alive(record.leader_pid) {
-                    let _ = verify_executable_if_available(record.leader_pid, &expected_node);
-                    terminate_pid_tree(record.leader_pid, None, deadline, None)?;
-                    terminated.push(record.leader_pid);
+        Ok(Some(mut record)) => {
+            let record_target = fs::canonicalize(&record.expected_executable)
+                .ok()
+                .filter(|target| target == &expected_node);
+            if record_target.is_some() && record.state == RegistryState::Active {
+                match process_state(record.leader_pid) {
+                    ProcessState::Dead => {
+                        // 记录指向已退出的进程：没有东西需要终止，退休该记录。
+                        unregister(&registry_path)?;
+                    }
+                    ProcessState::Alive => {
+                        match verify_executable_if_available(record.leader_pid, &expected_node) {
+                            ExecutableMatch::Matches => {
+                                terminate_pid_tree(record.leader_pid, None, deadline, None)?;
+                                terminated.push(record.leader_pid);
+                                unregister(&registry_path)?;
+                            }
+                            ExecutableMatch::Mismatch => {
+                                // PID 已被复用为其它进程：绝不终止；该记录不再代表有效
+                                // 所有权，标记隔离，交由枚举路径与下次启动处理。
+                                quarantine_record(&registry_path, &mut record)?;
+                            }
+                            ExecutableMatch::Unavailable => {
+                                return Ok(UninstallCleanup::Unverifiable {
+                                    reason: "无法校验 ownership registry 记录的主进程身份".into(),
+                                });
+                            }
+                        }
+                    }
+                    ProcessState::Unknown => {
+                        return Ok(UninstallCleanup::Unverifiable {
+                            reason: "无法确认 ownership registry 记录的主进程状态".into(),
+                        });
+                    }
                 }
-                unregister(&registry_path)?;
             }
-            // 记录属于另一份安装/便携目录或已损坏：保留它，继续做精确路径枚举。
+            // 记录属于另一份安装/便携目录、已损坏或非 active（quarantined/cleaning）：
+            // 不终止其进程、不移动记录，继续做精确路径枚举。
         }
         Ok(None) => {}
         Err(error) => {
@@ -388,9 +477,20 @@ pub fn cleanup_for_uninstall(
         if terminated.contains(&pid) {
             continue;
         }
-        let _ = verify_executable_if_available(pid, &expected_node);
-        terminate_pid_tree(pid, None, deadline, None)?;
-        terminated.push(pid);
+        match verify_executable_if_available(pid, &expected_node) {
+            ExecutableMatch::Matches => {
+                terminate_pid_tree(pid, None, deadline, None)?;
+                terminated.push(pid);
+            }
+            ExecutableMatch::Mismatch => {
+                // 枚举与校验之间 PID 已易主：跳过，不是我们的进程。
+            }
+            ExecutableMatch::Unavailable => {
+                return Ok(UninstallCleanup::Unverifiable {
+                    reason: format!("无法校验受管进程 {pid} 的身份"),
+                });
+            }
+        }
     }
 
     let outcome = UninstallCleanup::Clean { terminated };
@@ -422,7 +522,8 @@ fn enumerate_pids_by_executable(expected: &Path, exclude_pid: u32) -> Result<Vec
     let expected = crate::paths::strip_verbatim_prefix(expected.to_path_buf());
     let script = "$target = [System.IO.Path]::GetFullPath($env:DEEPSHELL_MAINTENANCE_TARGET); \
 Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ([System.IO.Path]::GetFullPath($_.ExecutablePath)).Equals($target, [System.StringComparison]::OrdinalIgnoreCase) } | ForEach-Object { [Console]::Out.WriteLine($_.ProcessId) }";
-    let output = console_command("powershell.exe")
+    let mut command = console_command("powershell.exe");
+    command
         .env("DEEPSHELL_MAINTENANCE_TARGET", &expected)
         .args([
             "-NoProfile",
@@ -430,12 +531,12 @@ Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ([System.I
             "Bypass",
             "-Command",
             script,
-        ])
-        .output()
-        .map_err(|error| {
+        ]);
+    let output =
+        run_command_with_timeout(&mut command, Duration::from_secs(10)).map_err(|error| {
             AppError::new(
                 ErrorCode::RuntimeStopFailed,
-                format!("无法启动进程枚举：{error}"),
+                format!("进程枚举未完成：{}", error.diagnostic_message()),
             )
         })?;
     if !output.status.success() {
@@ -468,45 +569,101 @@ Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ([System.I
     Ok(pids)
 }
 
-fn process_alive(pid: u32) -> bool {
-    console_command("powershell.exe")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &format!("if (Get-Process -Id {pid} -ErrorAction SilentlyContinue) {{ exit 0 }} else {{ exit 1 }}"),
-        ])
-        .status()
-        .is_ok_and(|status| status.success())
+/// 进程存活三态：**"无法确认"必须与"已退出"区分**，否则会发生两类错误：
+/// 误把仍存活的受管进程当作已退出（漏清理却报成功），或在身份无法校验时继续终止。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ProcessState {
+    Alive,
+    Dead,
+    Unknown,
 }
 
-fn verify_executable_if_available(pid: u32, expected: &Path) -> Result<(), AppError> {
-    let output = console_command("powershell.exe")
-        .args([
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &format!("$p = Get-Process -Id {pid} -ErrorAction Stop; if ($p.Path) {{ [Console]::Out.Write($p.Path) }}"),
-        ])
-        .output()
+/// 在超时内运行外部命令并收集输出。
+///
+/// 这些命令全部是无界面后台工具；没有超时保护时，PowerShell 挂起会让维护命令
+/// 与 NSIS `ExecWait` 一起无限等待。输出量都很小（pid 列表 / 单行路径），不会填满管道。
+fn run_command_with_timeout(
+    command: &mut Command,
+    timeout: Duration,
+) -> Result<std::process::Output, AppError> {
+    let mut child = command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(runtime_stop_error)?;
-    if !output.status.success() {
-        return Ok(());
+    let deadline = Instant::now() + timeout;
+    loop {
+        if child.try_wait().map_err(runtime_stop_error)?.is_some() {
+            break;
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(AppError::new(
+                ErrorCode::RuntimeStopFailed,
+                format!("外部命令在 {timeout:?} 内未完成，已终止"),
+            ));
+        }
+        thread::sleep(Duration::from_millis(25));
     }
+    child.wait_with_output().map_err(runtime_stop_error)
+}
+
+/// 用 `tasklist` 判定进程存活。
+///
+/// 选择 tasklist 而非 PowerShell：无需 PS 运行时（更快、对 PS 策略故障不敏感），
+/// 且任务不存在时返回成功但输出无匹配行，可以可靠区分"已退出"与"查询失败"。
+fn process_state(pid: u32) -> ProcessState {
+    let mut command = console_command("tasklist");
+    command.args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"]);
+    match run_command_with_timeout(&mut command, Duration::from_secs(5)) {
+        Ok(output) if output.status.success() => {
+            let text = String::from_utf8_lossy(&output.stdout);
+            if text.contains(&format!("\"{pid}\",")) {
+                ProcessState::Alive
+            } else {
+                ProcessState::Dead
+            }
+        }
+        _ => ProcessState::Unknown,
+    }
+}
+
+/// 进程身份校验结果。**"无法校验"必须与"身份匹配"区分**：
+/// 前者在清理路径上必须失败关闭（不得因为查不到路径就认为可以终止）。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ExecutableMatch {
+    Matches,
+    Mismatch,
+    Unavailable,
+}
+
+fn verify_executable_if_available(pid: u32, expected: &Path) -> ExecutableMatch {
+    let mut command = console_command("powershell.exe");
+    command.args([
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-Command",
+        &format!("$p = Get-Process -Id {pid} -ErrorAction Stop; if ($p.Path) {{ [Console]::Out.Write($p.Path) }}"),
+    ]);
+    let output = match run_command_with_timeout(&mut command, Duration::from_secs(5)) {
+        Ok(output) if output.status.success() => output,
+        _ => return ExecutableMatch::Unavailable,
+    };
     let actual = String::from_utf8_lossy(&output.stdout).trim().to_owned();
     if actual.is_empty() {
-        return Ok(());
+        return ExecutableMatch::Unavailable;
     }
-    let actual = fs::canonicalize(actual).map_err(runtime_stop_error)?;
-    if actual != expected {
-        return Err(AppError::new(
-            ErrorCode::RuntimeStopFailed,
-            "Sidecar 主进程路径与 ownership registry 不匹配；拒绝误杀",
-        ));
+    let Ok(actual) = fs::canonicalize(actual) else {
+        return ExecutableMatch::Unavailable;
+    };
+    if actual == expected {
+        ExecutableMatch::Matches
+    } else {
+        ExecutableMatch::Mismatch
     }
-    Ok(())
 }
 
 fn ensure_active(record: &OwnershipRegistry) -> Result<(), AppError> {
@@ -656,7 +813,11 @@ mod tests {
         .unwrap();
         unregister(&registry).unwrap();
 
-        assert!(!process_alive(tree_child_pid), "进程树子进程必须被终止");
+        assert_eq!(
+            process_state(tree_child_pid),
+            ProcessState::Dead,
+            "进程树子进程必须被终止"
+        );
         assert!(!registry.exists(), "ownership record 必须被退休");
     }
 
@@ -679,5 +840,221 @@ mod tests {
         .unwrap();
         unregister(&registry).unwrap();
         assert!(!registry.exists());
+    }
+
+    #[test]
+    fn process_state_distinguishes_alive_and_dead_pids() {
+        assert_eq!(process_state(std::process::id()), ProcessState::Alive);
+        assert_eq!(process_state(0x7FFF_FFF0), ProcessState::Dead);
+    }
+
+    #[test]
+    fn run_command_with_timeout_kills_a_hanging_command() {
+        let node = bundled_node();
+        assert!(node.is_file(), "测试前必须准备 bundled Node");
+        let mut command = console_command(node.to_str().expect("node 路径必须是 UTF-8"));
+        command.args(["-e", "setInterval(() => {}, 1000)"]);
+        let started = Instant::now();
+        let error = run_command_with_timeout(&mut command, Duration::from_millis(800)).unwrap_err();
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "超时必须及时返回"
+        );
+        assert!(
+            error.diagnostic_message().contains("未完成"),
+            "{}",
+            error.diagnostic_message()
+        );
+    }
+
+    /// 构造一个最小安装布局：把真实 Node 复制为 `<root>/runtime/node/win32-x64/node.exe`。
+    ///
+    /// 用复制而非硬链接：Windows 硬链接不能跨卷，而临时目录与 bundled Node 的位置
+    /// 不受本测试控制（曾出现 CrossesDevices）。
+    fn make_install_layout(root: &Path) -> PathBuf {
+        let node_directory = root.join("runtime").join("node").join("win32-x64");
+        fs::create_dir_all(&node_directory).unwrap();
+        let node = node_directory.join("node.exe");
+        fs::copy(bundled_node(), &node).unwrap();
+        node
+    }
+
+    /// 在项目所在卷上创建临时目录（减少与项目文件的跨卷差异）。
+    fn project_volume_tempdir() -> tempfile::TempDir {
+        let base = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime/staging");
+        fs::create_dir_all(&base).unwrap();
+        tempfile::tempdir_in(base).unwrap()
+    }
+
+    fn write_test_record(registry: &Path, expected: &Path, leader_pid: u32, state: &str) {
+        let record = serde_json::json!({
+            "schemaVersion": 1,
+            "instanceId": "test",
+            "ownershipToken": "test-token",
+            "generation": 1,
+            "state": state,
+            "leaderPid": leader_pid,
+            "expectedExecutable": expected.to_string_lossy(),
+        });
+        fs::write(registry, serde_json::to_vec(&record).unwrap()).unwrap();
+    }
+
+    /// 启动一个与 DeepShell 无关的存活进程（模拟"PID 被复用给别的进程"）。
+    fn spawn_unrelated_victim() -> Child {
+        console_command("powershell.exe")
+            .args(["-NoProfile", "-Command", "Start-Sleep -Seconds 300"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("无法启动 victim 进程")
+    }
+
+    #[test]
+    fn cleanup_does_not_terminate_a_reused_pid_and_quarantines_the_record() {
+        // F-WR-01 回归保护：record 属于当前安装且状态 active，但 leader PID 已被复用给
+        // 无关进程时，**绝不能终止该进程**；记录应被隔离而不是删除。
+        let node = bundled_node();
+        assert!(node.is_file(), "测试前必须准备 bundled Node");
+        let install = project_volume_tempdir();
+        let expected = make_install_layout(install.path());
+        let app_data = project_volume_tempdir();
+        fs::create_dir_all(app_data.path().join("runtime-state")).unwrap();
+        let registry = app_data.path().join("runtime-state").join("ownership.json");
+        let mut victim = spawn_unrelated_victim();
+        write_test_record(&registry, &expected, victim.id(), "active");
+
+        let outcome = cleanup_for_uninstall(
+            install.path(),
+            app_data.path(),
+            std::process::id(),
+            Instant::now() + Duration::from_secs(10),
+        )
+        .unwrap();
+
+        match outcome {
+            UninstallCleanup::Clean { terminated } => {
+                assert!(terminated.is_empty(), "复用的 PID 不得被终止")
+            }
+            UninstallCleanup::AppRunning { .. } | UninstallCleanup::Unverifiable { .. } => {
+                panic!("期望 Clean（无受管进程），得到其它结果")
+            }
+        }
+        assert!(victim.try_wait().unwrap().is_none(), "无关进程必须保持存活");
+        let record: serde_json::Value =
+            serde_json::from_slice(&fs::read(&registry).unwrap()).unwrap();
+        assert_eq!(record["state"], "quarantined", "复用 PID 的记录必须被隔离");
+
+        let _ = victim.kill();
+        let _ = victim.wait();
+    }
+
+    #[test]
+    fn cleanup_ignores_a_quarantined_record_for_the_current_install() {
+        // F-WR-01：非 active（quarantined）记录不得直接触发终止。
+        let node = bundled_node();
+        assert!(node.is_file(), "测试前必须准备 bundled Node");
+        let install = project_volume_tempdir();
+        let expected = make_install_layout(install.path());
+        let app_data = project_volume_tempdir();
+        fs::create_dir_all(app_data.path().join("runtime-state")).unwrap();
+        let registry = app_data.path().join("runtime-state").join("ownership.json");
+        let mut victim = spawn_unrelated_victim();
+        write_test_record(&registry, &expected, victim.id(), "quarantined");
+
+        let outcome = cleanup_for_uninstall(
+            install.path(),
+            app_data.path(),
+            std::process::id(),
+            Instant::now() + Duration::from_secs(10),
+        )
+        .unwrap();
+
+        match outcome {
+            UninstallCleanup::Clean { terminated } => assert!(terminated.is_empty()),
+            UninstallCleanup::AppRunning { .. } | UninstallCleanup::Unverifiable { .. } => {
+                panic!("期望 Clean（无受管进程），得到其它结果")
+            }
+        }
+        assert!(
+            victim.try_wait().unwrap().is_none(),
+            "隔离记录指向的进程必须保持存活"
+        );
+        let record: serde_json::Value =
+            serde_json::from_slice(&fs::read(&registry).unwrap()).unwrap();
+        assert_eq!(record["state"], "quarantined", "隔离状态必须保留");
+
+        let _ = victim.kill();
+        let _ = victim.wait();
+    }
+
+    #[test]
+    fn cleanup_retires_a_record_whose_leader_is_dead() {
+        let node = bundled_node();
+        assert!(node.is_file(), "测试前必须准备 bundled Node");
+        let install = project_volume_tempdir();
+        let expected = make_install_layout(install.path());
+        let app_data = project_volume_tempdir();
+        fs::create_dir_all(app_data.path().join("runtime-state")).unwrap();
+        let registry = app_data.path().join("runtime-state").join("ownership.json");
+        write_test_record(&registry, &expected, 0x7FFF_FFF0, "active");
+
+        let outcome = cleanup_for_uninstall(
+            install.path(),
+            app_data.path(),
+            std::process::id(),
+            Instant::now() + Duration::from_secs(10),
+        )
+        .unwrap();
+
+        match outcome {
+            UninstallCleanup::Clean { terminated } => assert!(terminated.is_empty()),
+            UninstallCleanup::AppRunning { .. } | UninstallCleanup::Unverifiable { .. } => {
+                panic!("期望 Clean（无受管进程），得到其它结果")
+            }
+        }
+        assert!(!registry.exists(), "leader 已死的记录必须被退休");
+    }
+
+    #[test]
+    fn cleanup_keeps_a_foreign_record_and_its_process_untouched() {
+        // 记录属于另一份安装目录：不终止其进程、不移动记录。
+        let node = bundled_node();
+        assert!(node.is_file(), "测试前必须准备 bundled Node");
+        let install = tempfile::tempdir().unwrap();
+        make_install_layout(install.path());
+        let foreign = project_volume_tempdir();
+        let foreign_node = make_install_layout(foreign.path());
+        let app_data = tempfile::tempdir().unwrap();
+        fs::create_dir_all(app_data.path().join("runtime-state")).unwrap();
+        let registry = app_data.path().join("runtime-state").join("ownership.json");
+        let mut victim = spawn_unrelated_victim();
+        write_test_record(&registry, &foreign_node, victim.id(), "active");
+
+        let outcome = cleanup_for_uninstall(
+            install.path(),
+            app_data.path(),
+            std::process::id(),
+            Instant::now() + Duration::from_secs(10),
+        )
+        .unwrap();
+
+        match outcome {
+            UninstallCleanup::Clean { terminated } => assert!(terminated.is_empty()),
+            UninstallCleanup::AppRunning { .. } | UninstallCleanup::Unverifiable { .. } => {
+                panic!("期望 Clean（无受管进程），得到其它结果")
+            }
+        }
+        assert!(
+            victim.try_wait().unwrap().is_none(),
+            "外来记录指向的进程必须保持存活"
+        );
+        assert!(registry.exists(), "外来记录必须保留");
+        let record: serde_json::Value =
+            serde_json::from_slice(&fs::read(&registry).unwrap()).unwrap();
+        assert_eq!(record["state"], "active", "外来记录不得被改写");
+
+        let _ = victim.kill();
+        let _ = victim.wait();
     }
 }

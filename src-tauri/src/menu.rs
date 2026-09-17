@@ -78,14 +78,31 @@ pub const APPLICATION_MENU: &[MenuSpec] = &[
     },
 ];
 
+/// 从 `runtime-lock.json` 构造 credits（`include_str!` 让 rustc 追踪该文件变化），
+/// 避免 About 信息与锁定运行时漂移（此前的版本号是硬编码字符串）。
+fn runtime_credits() -> String {
+    let lock: serde_json::Value =
+        serde_json::from_str(include_str!("../../runtime/manifest/runtime-lock.json"))
+            .expect("runtime-lock.json 必须可解析");
+    let version = |key: &str| {
+        lock.get(key)
+            .and_then(|value| value.get("version"))
+            .and_then(|value| value.as_str())
+            .unwrap_or("unknown")
+    };
+    format!(
+        "A desktop agent powered by DeepSeek Harness.\nNode.js {}\nDeepSeek Harness {}",
+        version("node"),
+        version("dsh"),
+    )
+}
+
 /// 共享 About 元数据：两个平台使用同一份产品名、版本与 credits。
 pub fn about_metadata() -> AboutMetadata<'static> {
     AboutMetadataBuilder::new()
         .name(Some(PRODUCT_NAME))
         .version(Some(env!("CARGO_PKG_VERSION")))
-        .credits(Some(
-            "A desktop agent powered by DeepSeek Harness.\nNode.js 24.20.0\nDeepSeek Harness 0.1.5-rc.1",
-        ))
+        .credits(Some(runtime_credits()))
         .build()
 }
 
@@ -188,6 +205,11 @@ mod tests {
         assert_eq!(metadata.version.as_deref(), Some(env!("CARGO_PKG_VERSION")));
         let credits = metadata.credits.as_deref().unwrap_or_default();
         assert!(credits.contains("DeepSeek Harness"));
+        assert!(credits.contains("Node.js"));
+        assert!(
+            !credits.contains("unknown"),
+            "credits 必须从 runtime-lock.json 解析出版本：{credits}"
+        );
     }
 
     #[test]

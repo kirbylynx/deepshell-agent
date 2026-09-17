@@ -18,10 +18,11 @@
 // 2. 只复制 allowlist 条目；复制过程拒绝任何符号链接 / junction / reparse point；
 // 3. 压缩必须使用参数数组调用 Windows 自带 tar.exe，禁止 shell 字符串拼接；
 // 4. 压缩后必须解压到全新目录逐项复验（staging ≡ extracted），复验通过才报告成功。
-import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { access, copyFile, lstat, mkdir, readdir, readFile, rm, stat } from 'node:fs/promises'
-import { dirname, resolve, sep } from 'node:path'
+import { basename, dirname, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { readLock, root } from './lib/runtime.mjs'
@@ -91,11 +92,19 @@ export function assertSafePortableStageBase(stageBase, packageRoot = root) {
   }
 }
 
-function sha256(content) {
-  return createHash('sha256').update(content).digest('hex')
+/// 流式计算文件 sha256（避免把上百 MB 的 ZIP 读入内存）。
+async function hashFile(path) {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256')
+    createReadStream(path)
+      .on('error', reject)
+      .on('data', chunk => hash.update(chunk))
+      .on('end', () => resolve(hash.digest('hex')))
+  })
 }
 
-async function copyTreeWithoutReparsePoints(sourceDirectory, targetDirectory) {
+/// 递归复制目录树，拒绝任何符号链接 / junction / reparse point（导出供单测直接验证）。
+export async function copyTreeWithoutReparsePoints(sourceDirectory, targetDirectory) {
   const entries = await readdir(sourceDirectory)
   await mkdir(targetDirectory, { recursive: true })
   for (const entry of entries) {
@@ -112,6 +121,36 @@ async function copyTreeWithoutReparsePoints(sourceDirectory, targetDirectory) {
     if (!metadata.isFile()) throw new Error(`便携 staging 不支持的条目类型：${source}`)
     await copyFile(source, target)
   }
+}
+
+/// 压缩 staging 并解压到全新目录做逐项复验（导出供单测直接验证）。
+///
+/// 只接受显式路径：生产调用方使用 `portablePaths()` 的位置约定，测试可用临时目录；
+/// 复验包含"ZIP 顶层是单一目录"、便携布局断言与 staging ≡ extracted 等价比较。
+export async function packAndVerify({ stagingPath, stagingParent, archivePath, extractParent }) {
+  const tarPath = resolve(process.env.SystemRoot ?? 'C:/Windows', 'System32/tar.exe')
+  try {
+    await access(tarPath)
+  } catch {
+    throw new Error(`缺少 Windows ZIP 后端（tar.exe）：${tarPath}`)
+  }
+  const stagingName = basename(stagingPath)
+  await mkdir(dirname(archivePath), { recursive: true })
+  await execFileAsync(tarPath, ['-a', '-c', '-f', archivePath, '-C', stagingParent, stagingName], {
+    maxBuffer: 16 * 1024 * 1024
+  })
+  await mkdir(extractParent, { recursive: true })
+  await execFileAsync(tarPath, ['-x', '-f', archivePath, '-C', extractParent], {
+    maxBuffer: 16 * 1024 * 1024
+  })
+  const extractedTopLevel = await readdir(extractParent)
+  if (extractedTopLevel.length !== 1 || extractedTopLevel[0] !== stagingName) {
+    throw new Error(`便携 ZIP 顶层必须是单一目录 ${stagingName}：${extractedTopLevel.join(', ')}`)
+  }
+  const extractedPath = resolve(extractParent, stagingName)
+  assertPortableLayout(await readdir(extractedPath), 'portable extracted tree')
+  const equivalence = await assertEquivalentTrees(stagingPath, extractedPath, 'portable staging/extracted')
+  return { extractedPath, staging: equivalence.source, extracted: equivalence.target }
 }
 
 export async function createWindowsPortable() {
@@ -182,50 +221,41 @@ export async function createWindowsPortable() {
     }
   }
 
-  // 压缩：参数数组调用 tar.exe；-a 按扩展名选择 zip 格式。
-  await execFileAsync(tarPath, ['-a', '-c', '-f', paths.archivePath, '-C', paths.stagingParent, PORTABLE_ROOT_NAME], {
-    maxBuffer: 16 * 1024 * 1024
+  // 压缩 → 解压 → 复验（顶层目录断言与 staging ≡ extracted 等价比较）。
+  const { extractedPath, staging, extracted } = await packAndVerify({
+    stagingPath: paths.stagingPath,
+    stagingParent: paths.stagingParent,
+    archivePath: paths.archivePath,
+    extractParent: paths.extractParent
   })
-
-  // 解压到全新目录并逐项复验。
-  await mkdir(paths.extractParent, { recursive: true })
-  await execFileAsync(tarPath, ['-x', '-f', paths.archivePath, '-C', paths.extractParent], {
-    maxBuffer: 16 * 1024 * 1024
-  })
-  const extractedTopLevel = await readdir(paths.extractParent)
-  if (extractedTopLevel.length !== 1 || extractedTopLevel[0] !== PORTABLE_ROOT_NAME) {
-    throw new Error(`便携 ZIP 顶层必须是单一目录 ${PORTABLE_ROOT_NAME}：${extractedTopLevel.join(', ')}`)
-  }
-  assertPortableLayout(await readdir(paths.extractedPath), 'portable extracted tree')
   for (const relative of adapter.forbiddenArtifacts) {
     try {
-      await access(resolve(paths.extractedPath, relative))
+      await access(resolve(extractedPath, relative))
       throw new Error(`便携解压树包含禁止资源：${relative}`)
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error
     }
   }
-  const equivalence = await assertEquivalentTrees(paths.stagingPath, paths.extractedPath, 'portable staging/extracted')
 
   const archiveBytes = (await stat(paths.archivePath)).size
-  const archiveSha256 = sha256(await readFile(paths.archivePath))
+  const archiveSha256 = await hashFile(paths.archivePath)
   console.log(JSON.stringify({
     ok: true,
     version,
     stagingPath: paths.stagingPath,
-    extractedPath: paths.extractedPath,
+    extractedPath,
     archivePath: paths.archivePath,
     archiveBytes,
     archiveSha256,
     staging: {
-      bytes: equivalence.source.bytes,
-      files: equivalence.source.files,
-      contentSha256: equivalence.source.contentSha256
+      bytes: staging.bytes,
+      files: staging.files,
+      contentSha256: staging.contentSha256
     },
     extracted: {
-      bytes: equivalence.target.bytes,
-      files: equivalence.target.files,
-      contentSha256: equivalence.target.contentSha256
+      bytes: extracted.bytes,
+      files: extracted.files,
+      contentSha256: extracted.contentSha256
     }
   }))
 }

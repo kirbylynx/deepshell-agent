@@ -511,6 +511,38 @@ describe('v0.1.1 release hardening scripts', () => {
     }
   })
 
+  it('release staging --require-assets 在资产缺失时失败且不产出快照', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-require-assets-'))
+    try {
+      const output = resolve(temporary, 'release')
+      const support = resolve(temporary, 'good.json')
+      const dmgDirectory = resolve(temporary, 'dmg')
+      const installerDirectory = resolve(temporary, 'nsis')
+      await mkdir(dmgDirectory)
+      await mkdir(installerDirectory)
+      await writeFile(support, '{"application":{"version":"0.1.4"}}\n')
+
+      await expect(runNode([
+        'scripts/release-staging.mjs',
+        '--version', '0.1.4',
+        '--output-dir', output,
+        '--dmg-dir', dmgDirectory,
+        '--windows-installer-dir', installerDirectory,
+        '--windows-portable-dir', resolve(temporary, 'portable-empty'),
+        '--require-assets', 'windows-nsis,windows-portable',
+        '--license-inventory', support,
+        '--sbom', support,
+        '--package-report', support,
+        '--security-audit', support
+      ])).rejects.toThrow(/windows-portable/)
+
+      // 校验失败必须发生在替换 output 之前：不得留下半成品快照。
+      expect(await access(output).then(() => true, () => false)).toBe(false)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
   it('release staging 自动发现时拒绝 old-only、错误产品名和错误架构资产', async () => {
     const cases = [
       ['old-only', 'DeepShell Agent_0.1.3_x64-setup.exe'],

@@ -121,6 +121,7 @@ export const platformSourceInputs = {
     'src-tauri/tauri.windows.conf.json',
     'src-tauri/windows/installer-hooks.nsh',
     'scripts/create-windows-portable.mjs',
+    'scripts/package-windows-installed-tree.mjs',
     'scripts/verify-windows-route.mjs',
     'packaging/windows/README-portable.txt',
     '.github/workflows/windows-release.yml',

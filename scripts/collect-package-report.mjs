@@ -278,11 +278,16 @@ const windowsInstallerMetrics = attachBaselineDelta(
 const portableStagingMetrics = inspectionMetric(validReleasePortableManifest, 'staging')
 const portableArchiveMetrics = inspectionMetric(validReleasePortableManifest, 'archive')
 const portableExtractedMetrics = inspectionMetric(validReleasePortableManifest, 'extracted')
-if (validReleasePortableManifest !== null &&
-    (portableStagingMetrics?.contentSha256 !== portableExtractedMetrics?.contentSha256 ||
-     portableStagingMetrics?.bytes !== portableExtractedMetrics?.bytes ||
-     portableStagingMetrics?.files !== portableExtractedMetrics?.files)) {
-  throw new Error('package report 的 portable staging 与 extracted 不一致')
+if (validReleasePortableManifest !== null) {
+  // 三个 subject 必须存在：缺失时不能静默记录 null（与 verify-package-size 的存在性断言一致）。
+  if (portableStagingMetrics === null || portableArchiveMetrics === null || portableExtractedMetrics === null) {
+    throw new Error('package report 的 portable manifest 缺少 staging/archive/extracted inspection')
+  }
+  if (portableStagingMetrics.contentSha256 !== portableExtractedMetrics.contentSha256 ||
+      portableStagingMetrics.bytes !== portableExtractedMetrics.bytes ||
+      portableStagingMetrics.files !== portableExtractedMetrics.files) {
+    throw new Error('package report 的 portable staging 与 extracted 不一致')
+  }
 }
 const windowsPortableMetrics = validReleasePortableManifest === null ? { status: 'missing' } : {
   status: 'present',

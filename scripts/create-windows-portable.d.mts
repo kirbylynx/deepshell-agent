@@ -12,4 +12,15 @@ export const portableTopLevelEntries: string[]
 export function assertPortableLayout(entries: string[], label?: string): void
 export function assertPortableTargetPath(target: string): void
 export function assertSafePortableStageBase(stageBase: string, packageRoot?: string): void
+export function copyTreeWithoutReparsePoints(sourceDirectory: string, targetDirectory: string): Promise<void>
+export function packAndVerify(options: {
+  stagingPath: string
+  stagingParent: string
+  archivePath: string
+  extractParent: string
+}): Promise<{
+  extractedPath: string
+  staging: { bytes: number; files: number; contentSha256: string }
+  extracted: { bytes: number; files: number; contentSha256: string }
+}>
 export function createWindowsPortable(): Promise<void>

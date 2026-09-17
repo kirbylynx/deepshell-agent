@@ -98,5 +98,6 @@ jobs:
           name: deepshell-agent-windows-x64-v${{ env.DEEPSHELL_VERSION }}
           path: |
             src-tauri/target/release/bundle/nsis/*
+            runtime/staging/package-release-win32-x64-*.json
             runtime/staging/release-v${{ env.DEEPSHELL_VERSION }}/*
           if-no-files-found: error

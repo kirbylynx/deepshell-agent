@@ -76,8 +76,11 @@ export const windowsAcceptance = {
   },
   '0.1.4': {
     record: 'docs/releases/v0.1.4.md',
+    // 注意：这里只写**稳定的量级**。精确的 bytes/delta 记录在 release 文档与
+    // manifest/package-report 中；若在此处写精确数字，而本文件属于构建输入 digest，
+    // 就会出现"改数字 → digest 变化 → 重建后数字再变"的循环。
     scope:
-      'WIN-01 to WIN-13 measured on real Windows 11 x64: per-platform runtime trimming (installed tree -196570267 bytes / -4800 files; NSIS -27580165 bytes), portable ZIP distribution, native File/Help menu, exit-path hardening, and the pre-uninstall cleanup whose end-to-end matrix removes the install tree completely even with an orphan Sidecar; session creation and UI-level data sharing remain manual items',
+      'WIN-01 to WIN-13 measured on real Windows 11 x64: per-platform runtime trimming (installed tree reduced by about 196.6 MB and 4800 files; NSIS reduced by about 27.6 MB), portable ZIP distribution, native File/Help menu, exit-path hardening, and the pre-uninstall cleanup whose end-to-end matrix removes the install tree completely even with an orphan Sidecar; session creation and UI-level data sharing remain manual items',
     unfixed: [
       { id: 'REL-025', summary: 'quarantined-record retirement on macOS (Windows side landed)' },
       { id: 'REL-026', summary: 'drag-and-drop' },

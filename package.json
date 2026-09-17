@@ -33,6 +33,7 @@
     "package:verify": "node scripts/verify-package.mjs release",
     "package:compare": "node scripts/compare-e2e-release.mjs",
     "package:report": "node scripts/collect-package-report.mjs",
+    "package:windows:installed-tree": "node scripts/package-windows-installed-tree.mjs",
     "package:size:verify": "node scripts/verify-package-size.mjs",
     "evidence:collect": "node scripts/collect-evidence.mjs",
     "licenses:collect": "node scripts/collect-licenses.mjs",

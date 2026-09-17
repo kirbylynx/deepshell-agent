@@ -1,6 +1,7 @@
 // 捕获按平台、按产物类型隔离的 package manifest（schema 5）。
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
+import { createReadStream } from 'node:fs'
 import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { basename, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -45,6 +46,17 @@ await access(adapter.resourcesRoot)
 await access(adapter.intermediateRoot)
 
 const digest = content => createHash('sha256').update(content).digest('hex')
+
+/// 流式计算文件 sha256：避免把整个安装包（数十 MB）读入内存。
+async function hashFile(path) {
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256')
+    createReadStream(path)
+      .on('error', reject)
+      .on('data', chunk => hash.update(chunk))
+      .on('end', () => resolve(hash.digest('hex')))
+  })
+}
 
 async function readMarkerText() {
   if (adapter.platform === 'darwin') {
@@ -144,16 +156,17 @@ if (adapter.platform === 'darwin') {
     contentSha256: appTree.contentSha256,
   })
   if (adapter.artifactKind === 'macos-dmg') {
-    const content = await readFile(adapter.artifactPath)
+    const artifactSha256 = await hashFile(adapter.artifactPath)
+    const artifactBytes = (await stat(adapter.artifactPath)).size
     const containedApp = await verifyDmgContainsApp(adapter.artifactPath, appRoot)
     inspections.push({
       subject: 'macos-dmg',
       inspectionMode: 'file-metadata-only',
       status: 'present',
-      resources: [{ path: basename(adapter.artifactPath), bytes: content.length, sha256: digest(content) }],
+      resources: [{ path: basename(adapter.artifactPath), bytes: artifactBytes, sha256: artifactSha256 }],
       runtimePlatforms: [],
-      size: { bytes: (await stat(adapter.artifactPath)).size, files: 1 },
-      sha256: digest(content),
+      size: { bytes: artifactBytes, files: 1 },
+      sha256: artifactSha256,
     })
     inspections.push({
       subject: 'dmg-contained-app',
@@ -166,16 +179,17 @@ if (adapter.platform === 'darwin') {
     })
   }
 } else if (adapter.artifactKind === 'nsis-installer') {
-  const content = await readFile(adapter.artifactPath)
+  const artifactSha256 = await hashFile(adapter.artifactPath)
+  const artifactBytes = (await stat(adapter.artifactPath)).size
   inspections.push({
     subject: 'nsis-installer',
     inspectionMode: 'file-metadata-only',
     status: 'present',
-    resources: [{ path: basename(adapter.artifactPath), bytes: content.length, sha256: digest(content) }],
+    resources: [{ path: basename(adapter.artifactPath), bytes: artifactBytes, sha256: artifactSha256 }],
     runtimePlatforms: [],
     runtimeInspectionStatus: 'unverified-until-installed-tree-inspection',
-    size: { bytes: (await stat(adapter.artifactPath)).size, files: 1 },
-    sha256: digest(content),
+    size: { bytes: artifactBytes, files: 1 },
+    sha256: artifactSha256,
   })
 } else if (adapter.artifactKind === 'windows-installed-tree') {
   // 安装树是唯一可遍历证明 NSIS 内容的 subject（设计 §4.3/§4.4）：
@@ -252,15 +266,16 @@ if (adapter.platform === 'darwin') {
     size: { bytes: stagingManifest.bytes, files: stagingManifest.files },
     contentSha256: stagingManifest.contentSha256,
   })
-  const archiveContent = await readFile(adapter.artifactPath)
+  const archiveSha256 = await hashFile(adapter.artifactPath)
+  const archiveBytes = (await stat(adapter.artifactPath)).size
   inspections.push({
     subject: 'archive',
     inspectionMode: 'file-metadata-only',
     status: 'present',
-    resources: [{ path: basename(adapter.artifactPath), bytes: archiveContent.length, sha256: digest(archiveContent) }],
+    resources: [{ path: basename(adapter.artifactPath), bytes: archiveBytes, sha256: archiveSha256 }],
     runtimePlatforms: [],
-    size: { bytes: (await stat(adapter.artifactPath)).size, files: 1 },
-    sha256: digest(archiveContent),
+    size: { bytes: archiveBytes, files: 1 },
+    sha256: archiveSha256,
   })
   inspections.push({
     subject: 'extracted',
@@ -294,7 +309,12 @@ if (adapter.platform === 'darwin') {
   platformSpecific = { linkedLibraries: adapter.linkedLibraries, signing: adapter.signing }
 }
 
-const artifactResources = await normalizedTreeManifest(adapter.intermediateRoot)
+// installed-tree / portable 的完整资源清单已在 inspections 中按 subject 记录；
+// 顶层 resources 再存一份全树（数万条目）会让清单体积翻倍，且没有消费方需要它。
+const aggregateOnlyKinds = new Set(['windows-installed-tree', 'windows-portable'])
+const artifactResources = aggregateOnlyKinds.has(adapter.artifactKind)
+  ? { entries: [] }
+  : await normalizedTreeManifest(adapter.intermediateRoot)
 const platformDigestField = adapter.runtimePlatform() === 'darwin-arm64'
   ? 'macosSourceInputSha256'
   : 'windowsSourceInputSha256'

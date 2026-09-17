@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -24,6 +24,8 @@ import {
   assertPortableLayout,
   assertPortableTargetPath,
   assertSafePortableStageBase,
+  copyTreeWithoutReparsePoints,
+  packAndVerify,
   portableAllowlist,
   portablePaths,
 } from '../../scripts/create-windows-portable.mjs'
@@ -416,6 +418,56 @@ describe('v0.1.4 打包契约', () => {
       .toThrow('运行时 staging 目录内')
     expect(() => assertSafePortableStageBase(resolve(workspace, 'runtime/staging', 'random'), workspace))
       .toThrow('portable-v<version>')
+  })
+
+  it('便携 staging 复制拒绝 junction / reparse point', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-portable-junction-'))
+    try {
+      const sourceRoot = resolve(temporary, 'source')
+      const realDirectory = resolve(sourceRoot, 'real')
+      await mkdir(realDirectory, { recursive: true })
+      await writeFile(resolve(realDirectory, 'file.txt'), 'content')
+      const junction = resolve(sourceRoot, 'linked')
+      await symlink(realDirectory, junction, 'junction')
+
+      await expect(copyTreeWithoutReparsePoints(sourceRoot, resolve(temporary, 'target')))
+        .rejects.toThrow(/reparse point/)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it.skipIf(process.platform !== 'win32')('便携 packAndVerify 完成压缩-解压-等价复验', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-portable-roundtrip-'))
+    try {
+      const stagingParent = resolve(temporary, 'staging')
+      const stagingPath = resolve(stagingParent, 'DeepShell Agent')
+      await mkdir(stagingPath, { recursive: true })
+      await writeFile(resolve(stagingPath, 'DeepShell Agent.exe'), 'exe')
+      await mkdir(resolve(stagingPath, 'runtime'), { recursive: true })
+      await writeFile(resolve(stagingPath, 'runtime', 'data.bin'), 'data')
+      await writeFile(resolve(stagingPath, 'LICENSE'), 'license')
+      await writeFile(resolve(stagingPath, 'README-portable.txt'), 'readme')
+      const archivePath = resolve(temporary, 'DeepShell.Agent_0.1.4_x64-portable.zip')
+      const extractParent = resolve(temporary, 'extracted')
+
+      const result = await packAndVerify({ stagingPath, stagingParent, archivePath, extractParent })
+      expect(result.extractedPath).toBe(resolve(extractParent, 'DeepShell Agent'))
+      expect(result.staging.contentSha256).toBe(result.extracted.contentSha256)
+
+      // 顶层目录名不符合约定时必须失败（防"压缩成功但布局错误"）。
+      const brokenParent = resolve(temporary, 'broken-staging')
+      const brokenPath = resolve(brokenParent, 'Wrong Name')
+      await mkdir(brokenPath, { recursive: true })
+      await expect(packAndVerify({
+        stagingPath: brokenPath,
+        stagingParent: brokenParent,
+        archivePath: resolve(temporary, 'broken.zip'),
+        extractParent: resolve(temporary, 'broken-extracted'),
+      })).rejects.toThrow(/顶层条目不符合便携布局|顶层必须是单一目录/)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
   })
 
   it('macOS DMG 也使用严格版本 token，避免 0.1.4 命中 0.1.40', () => {

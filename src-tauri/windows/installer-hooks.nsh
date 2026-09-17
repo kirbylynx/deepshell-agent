@@ -20,10 +20,15 @@
   IntCmp $R0 0 deepshell_cleanup_ok deepshell_cleanup_failed deepshell_cleanup_failed
 
   deepshell_cleanup_failed:
-    DetailPrint "DeepShell Agent: runtime cleanup failed (exit code $R0)."
+    DetailPrint "DeepShell Agent: runtime cleanup failed (exit code $R0). Uninstall aborted."
+    ; 静默卸载（/S）用于自动化场景，不能弹出阻塞式对话框等待人工点击。
+    IfSilent deepshell_cleanup_abort
     MessageBox MB_ICONSTOP|MB_OK "DeepShell Agent could not verify that its runtime processes are gone (exit code $R0).$\r$\nIf DeepShell Agent is still running, close it and run the uninstaller again.$\r$\nUninstall was aborted; no files were removed."
+  deepshell_cleanup_abort:
     Abort "DeepShell Agent uninstall aborted: runtime cleanup failed ($R0)"
 
   deepshell_cleanup_ok:
     DetailPrint "DeepShell Agent: runtime cleanup verified."
+    ; 给系统一点时间释放被终止进程持有的文件句柄，再进入删除阶段。
+    Sleep 500
 !macroend
