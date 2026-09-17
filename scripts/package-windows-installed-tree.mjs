@@ -24,6 +24,12 @@ import { root } from './lib/runtime.mjs'
 
 const execFileAsync = promisify(execFile)
 const SETTLE_TIMEOUT_MS = 30_000
+// 真机实测：NSIS 卸载器在"文件删除与主要注册表清理"完成之后，仍有**延迟的清理步骤**
+// 会在数十秒内再次删除卸载注册键（实测在脚本结束后 0–30 秒窗口内发生）。恢复注册表
+// 必须等该窗口结束，并在恢复后做复验重试，否则恢复的键会被再次删除。
+const UNINSTALL_QUIET_WINDOW_MS = 45_000
+const RESTORE_VERIFY_WINDOW_MS = 6_000
+const RESTORE_ATTEMPTS = 4
 const UNINSTALL_REGISTRY_KEY =
   'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\DeepShell Agent'
 
@@ -126,14 +132,12 @@ export async function packageWindowsInstalledTree() {
       await execFileAsync(resolve(installRoot, 'uninstall.exe'), ['/S'], { timeout: 10 * 60_000 })
         .catch(() => {})
       // 等待卸载**真正结束**：目录消失 **且** 卸载注册键被移除。
-      // NSIS 卸载器会派生自身到临时目录继续执行，删除目录与删除注册表的顺序不稳定；
-      // 若在卸载完成前恢复注册表，会被随后执行的卸载步骤再次删除（真机实测的竞态）。
       await waitFor(
         async () => !(await exists(installRoot)) && !(await registryKeyPresent()),
         SETTLE_TIMEOUT_MS,
       )
-      // 注册表写入可能滞后于删除操作，留一小段余量再恢复。
-      await new Promise(resolveWait => setTimeout(resolveWait, 1_500))
+      // 再等一段静默窗：卸载器的延迟清理会在这段时间内完成（见文件头常量说明）。
+      await new Promise(resolveWait => setTimeout(resolveWait, UNINSTALL_QUIET_WINDOW_MS))
       // NSIS 卸载器可能留下空目录外壳：清理它；若目录仍在，说明可能有文件残留，如实警告。
       await rm(installRoot, { recursive: true, force: true }).catch(() => {})
       if (await exists(installRoot)) {
@@ -142,11 +146,18 @@ export async function packageWindowsInstalledTree() {
     }
     if (!keepInstalled) {
       if (registryExported) {
-        const restored = await execFileAsync('reg.exe', ['import', registryBackup])
-          .then(() => true, () => false)
-        // 恢复后必须读回确认：恢复失败意味着环境被破坏，不能静默略过。
-        if (!restored || !(await registryKeyPresent())) {
-          console.warn(`警告：注册表恢复失败，请手工导入 ${registryBackup}`)
+        // 恢复 + 复验重试：恢复后留一个验证窗；若延迟清理再次删除该键则重试，
+        // 直到键稳定保持或重试耗尽（耗尽时给出可执行的人工恢复指引）。
+        let stable = false
+        for (let attempt = 1; attempt <= RESTORE_ATTEMPTS && !stable; attempt += 1) {
+          const restored = await execFileAsync('reg.exe', ['import', registryBackup])
+            .then(() => true, () => false)
+          if (!restored) continue
+          await new Promise(resolveWait => setTimeout(resolveWait, RESTORE_VERIFY_WINDOW_MS))
+          stable = await registryKeyPresent()
+        }
+        if (!stable) {
+          console.warn(`警告：注册表恢复未能稳定保持，请手工导入 ${registryBackup}`)
         }
       }
       if (startMenuExisted) {
