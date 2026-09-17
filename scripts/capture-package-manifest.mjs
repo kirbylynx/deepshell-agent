@@ -60,7 +60,7 @@ async function hashFile(path) {
 
 async function readMarkerText() {
   if (adapter.platform === 'darwin') {
-    const { stdout } = await execFileAsync('/usr/bin/strings', [adapter.binaryPath], { maxBuffer: 64 * 1024 * 1024 })
+    const { stdout } = await execFileAsync('/usr/bin/strings', [adapter.binaryPath], { maxBuffer: 64 * 1024 * 1024, timeout: 10 * 60_000 })
     return stdout
   }
   return adapter.readBinaryStrings(adapter.binaryPath)
@@ -83,8 +83,8 @@ const [
   ...configs
 ] = await Promise.all([
   readMarkerText(),
-  execFileAsync('cargo', ['metadata', '--locked', '--no-deps', '--format-version', '1', '--manifest-path', resolve(root, 'src-tauri/Cargo.toml')], { maxBuffer: 64 * 1024 * 1024 }),
-  execFileAsync('cargo', ['tree', '--locked', '--manifest-path', resolve(root, 'src-tauri/Cargo.toml'), '-e', 'features', ...featureArgs], { maxBuffer: 64 * 1024 * 1024 }),
+  execFileAsync('cargo', ['metadata', '--locked', '--no-deps', '--format-version', '1', '--manifest-path', resolve(root, 'src-tauri/Cargo.toml')], { maxBuffer: 64 * 1024 * 1024, timeout: 5 * 60_000 }),
+  execFileAsync('cargo', ['tree', '--locked', '--manifest-path', resolve(root, 'src-tauri/Cargo.toml'), '-e', 'features', ...featureArgs], { maxBuffer: 64 * 1024 * 1024, timeout: 10 * 60_000 }),
   readFile(resolve(root, 'src-tauri/capabilities/main.json')),
   readFile(resolve(adapter.resourcesRoot, 'runtime/profile-template/template-manifest.json')),
   readFile(resolve(root, 'src-tauri/Cargo.toml')),

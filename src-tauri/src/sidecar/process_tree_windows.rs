@@ -23,6 +23,10 @@ use tauri::AppHandle;
 /// 这些调用全部是**无界面的后台工具**，因此统一隐藏。
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
+/// `taskkill` 的单次等待上限；实际等待还会被调用方的 deadline 进一步收紧
+/// （退出路径的 deadline 仅 5 秒，工具本身不得越过调用方承诺的窗口）。
+const TASKKILL_TIMEOUT: Duration = Duration::from_secs(15);
+
 /// 构造一个**不显示控制台窗口**的命令。
 fn console_command(program: &str) -> Command {
     let mut command = Command::new(program);
@@ -137,10 +141,11 @@ pub fn recover_registered(
             ))
         }
         ExecutableMatch::Unavailable => {
-            return Err(AppError::new(
-                ErrorCode::RuntimeStopFailed,
-                "无法校验 ownership registry 的进程身份；拒绝在未知状态下清理",
-            ))
+            // 无法校验身份（例如 PowerShell 被企业策略禁用或组件损坏）：**不终止任何进程**
+            // ——失败关闭的安全目标已经达成；此时若继续报错，会把"查询工具故障"变成
+            // "应用永远无法启动"。因此隔离记录、跳过本次清理并继续启动（下次启动重试）。
+            quarantine_record(path, &mut record)?;
+            return Ok(());
         }
     }
     mark_cleaning(path, &mut record)?;
@@ -205,7 +210,7 @@ pub fn retry_cleanup(path: &Path, expected_executable: &Path) -> Result<(), AppE
             &mut record,
             AppError::new(
                 ErrorCode::RuntimeStopFailed,
-                "无法校验 quarantine 主进程身份；拒绝在未知状态下清理",
+                "无法校验 quarantine 主进程身份；拒绝在未知状态下清理（请检查 PowerShell 是否可用/被策略禁用）",
             ),
         ),
     }
@@ -273,7 +278,12 @@ fn terminate_pid_tree(
     // 返回成功前必须确认受管进程树已退出）。
     let mut taskkill_command = console_command("taskkill");
     taskkill_command.args(["/PID", &pid.to_string(), "/T", "/F"]);
-    let taskkill = run_command_with_timeout(&mut taskkill_command, Duration::from_secs(15));
+    // 等待上限取"调用方剩余窗口"与固定上限的较小值：退出路径的 deadline 只有 5 秒，
+    // 工具本身不得越过它多等；剩余为 0 时立即超时并按失败关闭处理。
+    let taskkill_timeout = deadline
+        .saturating_duration_since(Instant::now())
+        .min(TASKKILL_TIMEOUT);
+    let taskkill = run_command_with_timeout(&mut taskkill_command, taskkill_timeout);
     let taskkill_failure = match &taskkill {
         Ok(output) if output.status.success() => None,
         Ok(output) => Some(format!(
@@ -333,7 +343,7 @@ fn terminate_pid_tree(
         .unwrap_or_default();
     Err(AppError::new(
         ErrorCode::RuntimeStopFailed,
-        format!("已登记的 Sidecar 进程树在 5 秒后仍未退出{suffix}"),
+        format!("已登记的 Sidecar 进程树超过等待时限仍未退出{suffix}"),
     ))
 }
 
@@ -398,7 +408,9 @@ pub fn cleanup_for_uninstall(
             Ok(pids) => pids,
             Err(error) => {
                 return Ok(UninstallCleanup::Unverifiable {
-                    reason: format!("无法枚举主程序进程：{error}"),
+                    reason: format!(
+                        "无法枚举主程序进程：{error}（请检查 PowerShell 是否可用/被策略禁用）"
+                    ),
                 })
             }
         };
@@ -436,7 +448,7 @@ pub fn cleanup_for_uninstall(
                             }
                             ExecutableMatch::Unavailable => {
                                 return Ok(UninstallCleanup::Unverifiable {
-                                    reason: "无法校验 ownership registry 记录的主进程身份".into(),
+                                    reason: "无法校验 ownership registry 记录的主进程身份（请检查 PowerShell 是否可用/被策略禁用）".into(),
                                 });
                             }
                         }
@@ -468,9 +480,10 @@ pub fn cleanup_for_uninstall(
     let remaining = match enumerate_pids_by_executable(&expected_node, self_pid) {
         Ok(pids) => pids,
         Err(error) => {
-            return Ok(UninstallCleanup::Unverifiable {
-                reason: format!("无法枚举受管 Sidecar 进程：{error}"),
-            })
+            let reason = format!(
+                "无法枚举受管 Sidecar 进程：{error}（请检查 PowerShell 是否可用/被策略禁用）"
+            );
+            return Ok(UninstallCleanup::Unverifiable { reason });
         }
     };
     for pid in remaining {
@@ -487,7 +500,9 @@ pub fn cleanup_for_uninstall(
             }
             ExecutableMatch::Unavailable => {
                 return Ok(UninstallCleanup::Unverifiable {
-                    reason: format!("无法校验受管进程 {pid} 的身份"),
+                    reason: format!(
+                        "无法校验受管进程 {pid} 的身份（请检查 PowerShell 是否可用/被策略禁用）"
+                    ),
                 });
             }
         }

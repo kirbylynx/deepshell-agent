@@ -17,7 +17,7 @@
 // 运行前请确认没有正在运行的 DeepShell 实例与正在使用的安装。
 import { execFile } from 'node:child_process'
 import { access, copyFile, mkdir, readFile, rm } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { root } from './lib/runtime.mjs'
@@ -66,6 +66,29 @@ async function registryKeyPresent() {
   return execFileAsync('reg.exe', ['query', UNINSTALL_REGISTRY_KEY]).then(() => true, () => false)
 }
 
+// 安装测试根的防呆校验（导出供单测直接验证）：只允许位于 runtime/staging 下、
+// 以 install-tree-v<version> 结尾的专用目录——该目录稍后会被递归删除，绝不能接受
+// 任意路径（误传 --install-root 不得造成工作区、用户目录被删除）。
+export function assertSafeInstallRoot(installRoot, packageRoot = root) {
+  const normalized = resolve(installRoot)
+  const protectedPaths = [
+    resolve(packageRoot),
+    resolve(packageRoot, 'runtime/staging'),
+    resolve(process.env.USERPROFILE ?? packageRoot),
+    resolve(process.env.APPDATA ?? packageRoot),
+  ]
+  if (protectedPaths.some(protectedPath => normalized === protectedPath)) {
+    throw new Error(`拒绝把安装测试根指向受保护目录：${normalized}`)
+  }
+  const stagingRoot = resolve(packageRoot, 'runtime/staging') + sep
+  if (!normalized.startsWith(stagingRoot)) {
+    throw new Error(`安装测试根必须位于运行时 staging 目录内：${normalized}`)
+  }
+  if (!/(^|[\\/])install-tree-v[^\\/]+$/.test(normalized)) {
+    throw new Error(`安装测试根必须以 install-tree-v<version> 结尾：${normalized}`)
+  }
+}
+
 export async function packageWindowsInstalledTree() {
   if (process.platform !== 'win32') {
     throw new Error('installed-tree 捕获编排仅支持 Windows')
@@ -75,6 +98,7 @@ export async function packageWindowsInstalledTree() {
   const installRoot = resolve(
     argValue('--install-root') ?? resolve(root, 'runtime/staging', `install-tree-v${version}`),
   )
+  assertSafeInstallRoot(installRoot, root)
   const keepInstalled = process.argv.includes('--keep')
 
   const setup = resolve(
@@ -129,13 +153,28 @@ export async function packageWindowsInstalledTree() {
     console.log(JSON.stringify({ ok: true, installRoot, kept: keepInstalled }))
   } finally {
     if (installed && !keepInstalled) {
-      await execFileAsync(resolve(installRoot, 'uninstall.exe'), ['/S'], { timeout: 10 * 60_000 })
-        .catch(() => {})
+      const uninstallerExitedCleanly = await execFileAsync(
+        resolve(installRoot, 'uninstall.exe'),
+        ['/S'],
+        { timeout: 10 * 60_000 },
+      ).then(() => true, () => false)
       // 等待卸载**真正结束**：目录消失 **且** 卸载注册键被移除。
-      await waitFor(
+      const settled = await waitFor(
         async () => !(await exists(installRoot)) && !(await registryKeyPresent()),
         SETTLE_TIMEOUT_MS,
       )
+      if (!settled) {
+        // 卸载未确认完成（例如 hook 因应用仍在运行而 Abort，或卸载器挂起）：
+        // **不得**删除安装目录、**不得**恢复注册表——否则会把"卸载失败"伪装成
+        // "环境已恢复"（rm 掉半安装目录 + 旧注册表覆盖回去），且脚本仍报成功。
+        throw new Error(
+          `卸载未确认完成（安装目录或卸载注册键仍存在）；已保持现状、未删除目录、未恢复注册表。` +
+            `请确认没有 DeepShell 实例在运行后重试；安装目录：${installRoot}`,
+        )
+      }
+      if (!uninstallerExitedCleanly) {
+        console.warn('卸载器退出码非 0，但安装目录与卸载注册键均已移除；按卸载完成处理')
+      }
       // 再等一段静默窗：卸载器的延迟清理会在这段时间内完成（见文件头常量说明）。
       await new Promise(resolveWait => setTimeout(resolveWait, UNINSTALL_QUIET_WINDOW_MS))
       // NSIS 卸载器可能留下空目录外壳：清理它；若目录仍在，说明可能有文件残留，如实警告。

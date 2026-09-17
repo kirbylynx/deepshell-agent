@@ -29,6 +29,7 @@ import {
   portableAllowlist,
   portablePaths,
 } from '../../scripts/create-windows-portable.mjs'
+import { assertSafeInstallRoot } from '../../scripts/package-windows-installed-tree.mjs'
 
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const execFileAsync = promisify(execFile)
@@ -418,6 +419,20 @@ describe('v0.1.4 打包契约', () => {
       .toThrow('运行时 staging 目录内')
     expect(() => assertSafePortableStageBase(resolve(workspace, 'runtime/staging', 'random'), workspace))
       .toThrow('portable-v<version>')
+  })
+
+  it('安装测试根必须位于 runtime/staging/install-tree-v<version>（防止误删任意路径）', () => {
+    const version = '0.1.4'
+    expect(() => assertSafeInstallRoot(resolve(workspace, 'runtime/staging', `install-tree-v${version}`), workspace))
+      .not.toThrow()
+    expect(() => assertSafeInstallRoot(resolve(workspace), workspace)).toThrow('受保护目录')
+    expect(() => assertSafeInstallRoot(resolve(workspace, 'runtime/staging'), workspace)).toThrow('受保护目录')
+    expect(() => assertSafeInstallRoot(resolve(workspace, 'outside', `install-tree-v${version}`), workspace))
+      .toThrow('运行时 staging 目录内')
+    expect(() => assertSafeInstallRoot(resolve(workspace, 'runtime/staging', 'random'), workspace))
+      .toThrow('install-tree-v<version>')
+    expect(() => assertSafeInstallRoot(resolve(workspace, 'runtime/staging', `install-tree-v${version}`, 'nested'), workspace))
+      .toThrow('install-tree-v<version>')
   })
 
   it('便携 staging 复制拒绝 junction / reparse point', async () => {
