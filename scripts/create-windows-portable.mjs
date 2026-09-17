@@ -136,14 +136,16 @@ export async function packAndVerify({ stagingPath, stagingParent, archivePath, e
   }
   const stagingName = basename(stagingPath)
   await mkdir(dirname(archivePath), { recursive: true })
+  // 超时放宽到 30 分钟：340 MB / 2.7 万文件的 deflate 压缩在杀软实时扫描下的实测
+  // 耗时可达十几分钟（一次 10 分钟超时曾把合法压缩 SIGTERM 掉）。
   await execFileAsync(tarPath, ['-a', '-c', '-f', archivePath, '-C', stagingParent, stagingName], {
     maxBuffer: 16 * 1024 * 1024,
-    timeout: 10 * 60_000,
+    timeout: 30 * 60_000,
   })
   await mkdir(extractParent, { recursive: true })
   await execFileAsync(tarPath, ['-x', '-f', archivePath, '-C', extractParent], {
     maxBuffer: 16 * 1024 * 1024,
-    timeout: 10 * 60_000,
+    timeout: 30 * 60_000,
   })
   const extractedTopLevel = await readdir(extractParent)
   if (extractedTopLevel.length !== 1 || extractedTopLevel[0] !== stagingName) {

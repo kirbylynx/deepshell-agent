@@ -23,7 +23,10 @@ import { promisify } from 'node:util'
 import { root } from './lib/runtime.mjs'
 
 const execFileAsync = promisify(execFile)
-const SETTLE_TIMEOUT_MS = 30_000
+// 真机实测：340 MB / 2.7 万文件的安装树在杀软扫描波动下，卸载器完成"目录+注册键移除"
+// 可能超过 30 秒（一次实测约 30–40 秒导致假失败：卸载其实成功，脚本却判定未确认）。
+// 这里给足余量；超时后仍会做最后一次确认，避免刚好错过。
+const SETTLE_TIMEOUT_MS = 90_000
 // 真机实测：NSIS 卸载器在"文件删除与主要注册表清理"完成之后，仍有**延迟的清理步骤**
 // 会在数十秒内再次删除卸载注册键（实测在脚本结束后 0–30 秒窗口内发生）。恢复注册表
 // 必须等该窗口结束，并在恢复后做复验重试，否则恢复的键会被再次删除。
@@ -53,7 +56,8 @@ async function waitFor(predicate, timeoutMs, intervalMs = 500) {
     if (await predicate()) return true
     await new Promise(resolveWait => setTimeout(resolveWait, intervalMs))
   }
-  return false
+  // 超时后做最后一次确认：卸载可能恰好在此刻完成（避免"刚好错过"的假失败）。
+  return predicate()
 }
 
 async function tryBackup(source, target) {
@@ -167,9 +171,12 @@ export async function packageWindowsInstalledTree() {
         // 卸载未确认完成（例如 hook 因应用仍在运行而 Abort，或卸载器挂起）：
         // **不得**删除安装目录、**不得**恢复注册表——否则会把"卸载失败"伪装成
         // "环境已恢复"（rm 掉半安装目录 + 旧注册表覆盖回去），且脚本仍报成功。
+        // 注意：这是失败关闭，不等同于"卸载必然失败"——若复查发现目录与注册键
+        // 其实都已消失（卸载只是更慢），直接重跑本脚本即可。
         throw new Error(
           `卸载未确认完成（安装目录或卸载注册键仍存在）；已保持现状、未删除目录、未恢复注册表。` +
-            `请确认没有 DeepShell 实例在运行后重试；安装目录：${installRoot}`,
+            `请确认没有 DeepShell 实例在运行后重试；若复查发现目录与注册键均已消失，直接重跑本脚本。` +
+            `安装目录：${installRoot}`,
         )
       }
       if (!uninstallerExitedCleanly) {
