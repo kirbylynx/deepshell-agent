@@ -16,7 +16,13 @@
 
 !macro NSIS_HOOK_PREUNINSTALL
   DetailPrint "DeepShell Agent: checking for leftover runtime processes..."
+  ; 预置失败退出码并清零 error flag：ExecWait 在"子进程无法启动"（exe 缺失、被杀软
+  ; 锁定等）时不会写入退出码寄存器，若不预置，$R0 可能保持 0 而被误判为"清洁"，
+  ; 静默跳过清理。预置 15（清理失败）后，启动失败会落到 failed 分支并中止卸载。
+  ClearErrors
+  StrCpy $R0 15
   ExecWait '"$INSTDIR\deepshell-agent.exe" --maintenance cleanup-owned-runtime --install-root "$INSTDIR"' $R0
+  IfErrors deepshell_cleanup_failed
   IntCmp $R0 0 deepshell_cleanup_ok deepshell_cleanup_failed deepshell_cleanup_failed
 
   deepshell_cleanup_failed:

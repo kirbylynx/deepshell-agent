@@ -1,8 +1,7 @@
-import { createHash } from 'node:crypto'
 import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { root } from './lib/runtime.mjs'
+import { root, sha256 } from './lib/runtime.mjs'
 import { redactedJson } from './lib/redaction.mjs'
 import { windowsManifestFields, windowsNotesLine } from './lib/windows-acceptance.mjs'
 import {
@@ -74,11 +73,6 @@ async function assertOutputDirectoryMayBeReplaced(version, outputDirectory) {
   if (manifest.application?.name !== 'DeepShell Agent' || actualVersion !== version) {
     throw new Error(`拒绝替换 release-manifest sentinel 不匹配的目录：expected ${version}, got ${actualVersion ?? 'unknown'}`)
   }
-}
-
-async function sha256(path) {
-  const bytes = await readFile(path)
-  return createHash('sha256').update(bytes).digest('hex')
 }
 
 async function matchingAsset(directory, version, selector, extension, candidatePredicate = () => true) {

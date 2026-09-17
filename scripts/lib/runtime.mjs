@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { createReadStream } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -59,9 +60,15 @@ export function nodeArchivePath(lock, target) {
   return resolve(root, 'runtime/cache', basename(targetLock(lock, target).url))
 }
 
+/// 流式计算文件 sha256：避免把数百 MB 的发布资产（归档、安装包）整块读入内存。
 export async function sha256(path) {
-  const bytes = await readFile(path)
-  return createHash('sha256').update(bytes).digest('hex')
+  return new Promise((resolve, reject) => {
+    const hash = createHash('sha256')
+    createReadStream(path)
+      .on('error', reject)
+      .on('data', chunk => hash.update(chunk))
+      .on('end', () => resolve(hash.digest('hex')))
+  })
 }
 
 export function assertExactVersion(value, label) {

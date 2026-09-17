@@ -1,4 +1,5 @@
 import { homedir } from 'node:os'
+import { root } from './runtime.mjs'
 
 const SECRET_VALUE = '[REDACTED_SECRET]'
 const PATH_VALUE = '[REDACTED_PATH]'
@@ -11,6 +12,9 @@ function escapeRegExp(value) {
 function uniquePathPrefixes(options) {
   return [
     options.home,
+    // 工作区根路径同样脱敏：日志与产物不应泄露构建主机的仓库位置
+    // （消费方仍保留"绝对路径即拒绝"的独立检查，这里是第二道防线）。
+    root,
     process.env.HOME,
     homedir(),
     process.env.USERPROFILE,

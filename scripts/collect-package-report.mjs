@@ -1,7 +1,6 @@
-import { createHash } from 'node:crypto'
 import { access, readdir, readFile, stat, writeFile, mkdir } from 'node:fs/promises'
 import { basename, extname, relative, resolve } from 'node:path'
-import { currentRuntimePlatform, root } from './lib/runtime.mjs'
+import { currentRuntimePlatform, root, sha256 as sha256File } from './lib/runtime.mjs'
 import { redactedJson } from './lib/redaction.mjs'
 import { normalizedTreeManifest } from './lib/tree-manifest.mjs'
 import { platformInputDigest } from './lib/source-inputs.mjs'
@@ -45,8 +44,7 @@ async function directoryMetrics(path) {
 async function fileMetric(path) {
   if (!await exists(path)) return { status: 'missing', asset: basename(path) }
   const info = await stat(path)
-  const content = await readFile(path)
-  return { status: 'present', asset: basename(path), bytes: info.size, sha256: createHash('sha256').update(content).digest('hex') }
+  return { status: 'present', asset: basename(path), bytes: info.size, sha256: await sha256File(path) }
 }
 
 async function exactWindowsInstaller(version) {
@@ -119,6 +117,13 @@ const portableManifestArgument = argValue('--portable-manifest', resolve(root, '
 const releasePortableManifest = process.platform === 'win32' && portableManifestArgument !== 'none'
   ? await optionalJson(resolve(portableManifestArgument))
   : null
+// portable archive 的磁盘一致性策略：
+// - 生产默认路径（未显式传 --portable-manifest）：必须与 bundle 下的 ZIP 一致，缺失即失败；
+// - 外部传入的 manifest（测试/组合流程）：磁盘上不保证存在同名 ZIP，仅在显式提供
+//   `--portable-archive <zip>` 时比对。
+const portableManifestExplicit = process.argv.some(value => value === '--portable-manifest' || value.startsWith('--portable-manifest='))
+const portableArchiveArgument = argValue('--portable-archive', undefined)
+const enforcePortableArchiveOnDisk = !portableManifestExplicit || portableArchiveArgument !== undefined
 const runtimePlatform = currentRuntimePlatform()
 const currentSourceInputSha256 = await platformInputDigest(root, runtimePlatform)
 const sourceDigestField = runtimePlatform === 'darwin-arm64' ? 'macosSourceInputSha256' : 'windowsSourceInputSha256'
@@ -287,6 +292,22 @@ if (validReleasePortableManifest !== null) {
       portableStagingMetrics.bytes !== portableExtractedMetrics.bytes ||
       portableStagingMetrics.files !== portableExtractedMetrics.files) {
     throw new Error('package report 的 portable staging 与 extracted 不一致')
+  }
+  // archive 必须与磁盘上的 ZIP 一致（与 nsis 的资产-vs-manifest 比对对称）：
+  // manifest 中的资源路径已由 schema 校验为相对路径，可直接拼到 bundle 目录。
+  if (enforcePortableArchiveOnDisk) {
+    const archiveInspection = validReleasePortableManifest.inspections.find(item => item.subject === 'archive')
+    const archiveName = archiveInspection?.resources?.[0]?.path
+    const archivePath = portableArchiveArgument !== undefined
+      ? resolve(portableArchiveArgument)
+      : typeof archiveName === 'string'
+        ? resolve(root, 'src-tauri/target/release/bundle/portable', archiveName)
+        : null
+    const archiveOnDisk = archivePath === null ? { status: 'missing' } : await fileMetric(archivePath)
+    if (archiveOnDisk.status !== 'present' || archiveInspection.sha256 !== archiveOnDisk.sha256 ||
+        archiveInspection.size?.bytes !== archiveOnDisk.bytes) {
+      throw new Error('package report 的 portable archive 与磁盘 ZIP 不一致')
+    }
   }
 }
 const windowsPortableMetrics = validReleasePortableManifest === null ? { status: 'missing' } : {

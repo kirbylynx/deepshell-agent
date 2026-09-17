@@ -1,9 +1,8 @@
-import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { readFile, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { root } from './lib/runtime.mjs'
+import { root, sha256 as sha256File } from './lib/runtime.mjs'
 import { verifyReducedFile, verifyReducedTree } from './lib/package-size.mjs'
 import { platformInputDigest } from './lib/source-inputs.mjs'
 import { normalizedTreeManifest } from './lib/tree-manifest.mjs'
@@ -60,16 +59,15 @@ if (process.platform === 'darwin') {
   const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
   const appPath = resolve(root, 'src-tauri/target/release/bundle/macos/DeepShell Agent.app')
   const dmgPath = resolve(root, 'src-tauri/target/release/bundle/dmg', `DeepShell Agent_${pkg.version}_aarch64.dmg`)
-  const [actualApp, dmgContent, dmgMetadata] = await Promise.all([
+  const [actualApp, dmgSha256, dmgMetadata] = await Promise.all([
     normalizedTreeManifest(appPath),
-    readFile(dmgPath),
+    sha256File(dmgPath),
     stat(dmgPath),
   ])
   if (app.contentSha256 !== actualApp.contentSha256 || app.size.bytes !== actualApp.bytes || app.size.files !== actualApp.files) {
     throw new Error('macos-app manifest 与当前 .app 产物不一致，必须重建')
   }
-  const actualDmgSha256 = createHash('sha256').update(dmgContent).digest('hex')
-  if (dmg.sha256 !== actualDmgSha256 || dmg.size.bytes !== dmgMetadata.size || dmg.size.files !== 1) {
+  if (dmg.sha256 !== dmgSha256 || dmg.size.bytes !== dmgMetadata.size || dmg.size.files !== 1) {
     throw new Error('macos-dmg manifest 与当前 DMG 产物不一致，必须重建')
   }
   if (dmgContainedApp.contentSha256 !== actualApp.contentSha256 ||
