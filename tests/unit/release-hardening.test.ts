@@ -116,7 +116,16 @@ describe('v0.1.1 release hardening scripts', () => {
       const report = JSON.parse(reportText)
       expect(report.assets.app.status).toBe('present')
       expect(report.assets.dmg.asset).toBe('DeepShell Agent_0.1.4_aarch64.dmg')
-      expect(report.assets.windowsInstaller.status).toBe('missing')
+      // Windows 主机可能已产出 NSIS bundle（回退指标会命中本机产物），macOS 主机则必然缺失：
+      // 断言按平台感知，核心约束仍是"只允许出现资产 basename，不允许出现任何本地路径"。
+      if (process.platform === 'win32') {
+        expect(['present', 'missing']).toContain(report.assets.windowsInstaller.status)
+        if (report.assets.windowsInstaller.status === 'present') {
+          expect(report.assets.windowsInstaller.asset).toBe('DeepShell Agent_0.1.4_x64-setup.exe')
+        }
+      } else {
+        expect(report.assets.windowsInstaller.status).toBe('missing')
+      }
       expect(reportText).not.toContain(temporary)
       expect(reportText).not.toContain(root)
     } finally {

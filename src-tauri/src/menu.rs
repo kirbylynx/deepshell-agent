@@ -39,6 +39,11 @@ pub enum ItemKind {
     /// 自定义退出项：必须路由到 `request_exit`。
     #[cfg(not(target_os = "macos"))]
     Exit,
+    /// 分隔线：仅 macOS 应用菜单使用；非 macOS 的 File/Help 菜单不使用分隔线。
+    ///
+    /// C0 的对称修复（F001）只给 `Exit` 加了平台 cfg，导致非 macOS 构建中本变体
+    /// 永不构造而被 `clippy -D warnings` 判为 dead code（W7-F001）。
+    #[cfg(target_os = "macos")]
     Separator,
 }
 
@@ -149,6 +154,7 @@ pub fn build_application_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<M
                     true,
                     None::<&str>,
                 )?),
+                #[cfg(target_os = "macos")]
                 ItemKind::Separator => Box::new(PredefinedMenuItem::separator(app)?),
             };
             items.push(item);
