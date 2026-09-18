@@ -454,7 +454,7 @@ V1 优先采用“平台 Node Runtime + 预构建的生产 DSH 资源树”，�
 >
 > 实测：Windows NSIS 安装包**同时打包两套 Node 运行时**——`runtime/node/darwin-arm64` 与 `runtime/node/win32-x64`，其中 **macOS 部分 4800 文件 / 187.5 MB 在 Windows 上完全无用**（安装后总占用 32226 文件 / 512.03 MB）。macOS `.app` 侧存在对称的 `win32-x64` 浪费。
 >
-> 当前 `v0.1.4` 开发分支已通过平台专用 Tauri 配置与验证规则实现并重建验证 macOS 路线，macOS `.app` 只包含 `darwin-arm64` Node；Windows 路线的打包和真机验证尚未完成，因此 `REL-022` 仍保持 `Planned (v0.1.4)`，不得据此宣称跨平台功能已完成。
+> 当前 `v0.1.4` 开发分支已通过平台专用 Tauri 配置与验证规则实现两条平台路线：macOS `.app` 只包含 `darwin-arm64` Node；Windows 侧已落地并登记真机验收（见 `docs/releases/v0.1.4.md`，WIN-01…WIN-13 在真实 Windows 11 x64 实测）。macOS 最终联合回归（C0）与发布收口仍未完成，因此在 C0 登记 macOS 侧之前不得宣称跨平台功能已完成。
 
 ### 9.3 原子更新与迁移
 

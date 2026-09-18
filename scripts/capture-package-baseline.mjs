@@ -4,7 +4,7 @@ import { mkdir, readFile, realpath, stat, writeFile } from 'node:fs/promises'
 import { dirname, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
-import { root } from './lib/runtime.mjs'
+import { root, sha256 } from './lib/runtime.mjs'
 import { assertEquivalentTrees, normalizedTreeManifest, TREE_MANIFEST_ALGORITHM } from './lib/tree-manifest.mjs'
 import { v013BaselineInputDigest } from './lib/source-inputs.mjs'
 import { verifyDmgContainsApp } from './lib/macos-dmg.mjs'
@@ -183,12 +183,11 @@ async function readOptionalJson(path) {
 }
 
 async function fileMetric(path) {
-  const content = await readFile(path)
   return {
     status: 'canonical',
     bytes: (await stat(path)).size,
     files: 1,
-    sha256: createHash('sha256').update(content).digest('hex'),
+    sha256: await sha256(path),
   }
 }
 

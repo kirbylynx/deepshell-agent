@@ -36,7 +36,7 @@ fn redact_roots(path: &Path, paths: &AppPaths) -> String {
         if root_text.is_empty() || root_text == "\u{0}" {
             continue;
         }
-        if let Some(rest) = text.strip_prefix(root_text.as_ref()) {
+        if let Some(rest) = strip_prefix_case_insensitive(text.as_ref(), root_text.as_ref()) {
             // 必须落在分隔符边界上
             if rest.is_empty() || rest.starts_with(['\\', '/']) {
                 let normalized = rest.replace('\\', "/");
@@ -45,6 +45,15 @@ fn redact_roots(path: &Path, paths: &AppPaths) -> String {
         }
     }
     text.into_owned()
+}
+
+/// 大小写不敏感的前缀剥离（Windows 路径语义：`D:\DeepShell Agent` 与
+/// `d:\deepshell agent` 是同一位置）。仅比较 ASCII 大小写；非 ASCII 的大小写
+/// 差异不在此处理（路径两侧来源一致，且大小写折叠可能改变长度、破坏前缀语义）。
+fn strip_prefix_case_insensitive<'a>(text: &'a str, prefix: &str) -> Option<&'a str> {
+    let head = text.get(..prefix.len())?;
+    head.eq_ignore_ascii_case(prefix)
+        .then(|| &text[prefix.len()..])
 }
 
 /// 从 `paths.node` 反推资源根。
@@ -238,6 +247,18 @@ mod tests {
         let text = redact_roots(&sibling.join("file.txt"), &paths);
         assert!(!text.starts_with("<RESOURCES>"), "过度脱敏：{text}");
         assert!(text.contains("-other"), "实际为 {text}");
+    }
+
+    /// Windows 路径大小写不敏感：大小写不同的同一安装根也必须脱敏。
+    #[test]
+    fn redacts_roots_case_insensitively() {
+        let (_data, resources, paths) = roots();
+        let lowered = resources.to_string_lossy().to_lowercase();
+        let text = redact_roots(
+            &PathBuf::from(format!("{lowered}\\runtime\\node\\win32-x64\\node.exe")),
+            &paths,
+        );
+        assert!(text.starts_with("<RESOURCES>/"), "实际为 {text}");
     }
 
     /// **不得泄露系统目录**：既不属于数据目录也不属于资源根的路径（如 `System32`）

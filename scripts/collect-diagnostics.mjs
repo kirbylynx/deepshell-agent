@@ -1,4 +1,5 @@
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { access, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { arch, homedir, platform, release } from 'node:os'
 import { resolve } from 'node:path'
 import { readLock, root } from './lib/runtime.mjs'
@@ -32,6 +33,19 @@ function lastLines(text, limit) {
   return lines.slice(Math.max(0, lines.length - limit)).join('\n')
 }
 
+// 日志文件可能很大：只读尾部窗口，避免把整个 app.jsonl 读入内存后再截断。
+const LOG_TAIL_MAX_BYTES = 8 * 1024 * 1024
+
+async function readTail(path, maxBytes = LOG_TAIL_MAX_BYTES) {
+  const info = await stat(path)
+  if (info.size <= maxBytes) return readFile(path, 'utf8')
+  const chunks = []
+  for await (const chunk of createReadStream(path, { start: info.size - maxBytes })) {
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks).toString('utf8')
+}
+
 const lock = await readLock()
 const rootPackage = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
 const outputDirectory = resolve(argValue('--output', resolve(root, 'runtime/staging/diagnostics', new Date().toISOString().replace(/[:.]/g, '-'))))
@@ -47,7 +61,7 @@ let redactedLog = ''
 if (await exists(logFile)) {
   try {
     logIncluded = true
-    redactedLog = redactText(lastLines(await readFile(logFile, 'utf8'), lineLimit))
+    redactedLog = redactText(lastLines(await readTail(logFile), lineLimit))
     assertRedactedText(redactedLog)
     await writeFile(resolve(outputDirectory, 'app-log.redacted.jsonl'), redactedLog.endsWith('\n') ? redactedLog : `${redactedLog}\n`, { mode: 0o600 })
   } catch (error) {

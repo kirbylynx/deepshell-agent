@@ -10,7 +10,7 @@
 //    - `process.platform`（`'darwin'` / `'win32'`）只用于内部分支判据；
 //    - 写入产物清单的 `platform` 字段必须取 `currentRuntimePlatform()`
 //      （`'darwin-arm64'` / `'win32-x64'`），与 `runtime-lock.json` 的平台命名一致。
-// 3. macOS 分支的路径与 `requiredArtifacts`（6 条）与改造前**逐字一致**，
+// 3. macOS 分支的路径与 `requiredArtifacts`（5 条）与改造前**逐字一致**，
 //    M4（macOS 能力未削弱）的举证依赖这一点（设计 §4.9）。
 //
 // ⚠️ P6（首次真实 Windows 打包）实测纠正了设计阶段的 4 处路径/语义假设，逐条标注在下方。

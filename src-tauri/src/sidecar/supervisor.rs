@@ -797,7 +797,13 @@ fn write_sidecar_stderr_diagnostic(logs: &Path, tail: &Arc<Mutex<Vec<u8>>>) {
     if fs::create_dir_all(logs).is_err() {
         return;
     }
-    let _ = fs::write(logs.join("sidecar-stderr.log"), &*held);
+    // stderr 内容不可控：落盘前做与结构化日志同一套 token 脱敏，避免诊断文件把
+    // sidecar 打印过的凭据片段带到共享/汇总场景（非 UTF-8 字节按 lossy 处理）。
+    let text = String::from_utf8_lossy(&held);
+    let _ = fs::write(
+        logs.join("sidecar-stderr.log"),
+        logging::redact_detail(&text),
+    );
 }
 
 /// 应用自身 bootstrap 页面的 URL。
