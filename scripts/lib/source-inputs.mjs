@@ -74,6 +74,8 @@ const currentSharedSourceInputs = [
   'scripts/lib/artifact-selection.d.mts',
   'scripts/lib/package-manifest.mjs',
   'scripts/lib/package-manifest.d.mts',
+  'scripts/lib/package-report-mode.mjs',
+  'scripts/lib/package-report-mode.d.mts',
   'scripts/lib/package-size.mjs',
   'scripts/lib/package-size.d.mts',
   'scripts/lib/process-plan.mjs',

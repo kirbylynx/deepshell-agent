@@ -10,6 +10,7 @@ import { packageAdapter } from '../../scripts/lib/package-platform.mjs'
 import { summarizeInspections, validatePackageManifestV5 } from '../../scripts/lib/package-manifest.mjs'
 import { platformInputDigest } from '../../scripts/lib/source-inputs.mjs'
 import { normalizedTreeManifest } from '../../scripts/lib/tree-manifest.mjs'
+import { isCombinedWindowsPackageReportInput } from '../../scripts/lib/package-report-mode.mjs'
 import {
   assertArtifactNameMatchesVersion,
   isMacosDmgName,
@@ -56,7 +57,12 @@ function merge(left: Record<string, unknown>, right: Record<string, unknown>): R
 type BaselineFixture = {
   canonicalSource: { peeledCommit: string; baselineSourceInputSha256: string }
   measurement: { algorithm: string }
-  artifacts: { windowsNsis: { status: string; reason?: string; sha256: string; bytes: number } }
+  artifacts: {
+    macosApp: { status: string; contentSha256: string; bytes: number; files: number }
+    macosDmg: { status: string; sha256: string; bytes: number }
+    windowsInstalledTree: { status: string; contentSha256: string; bytes: number; files: number }
+    windowsNsis: { status: string; reason?: string; sha256: string; bytes: number }
+  }
 }
 
 // Windows 平台无法复现 darwin-arm64 的 macOS app/DMG 场景，因此用当前平台真实存在的
@@ -135,7 +141,13 @@ async function writeWindowsNsisInstaller(temporary: string) {
 }
 
 // portable 清单为首版：baseline 保持 pending，只要求 staging/archive/extracted 三方一致。
-function windowsPortableManifest(baseline: BaselineFixture, sourceDigest: string) {
+function windowsPortableManifest(
+  baseline: BaselineFixture,
+  sourceDigest: string,
+  archiveName = 'DeepShell.Agent_0.1.4_x64-portable.zip',
+  archiveBytes = 512,
+  archiveSha256 = 'f'.repeat(64),
+) {
   return {
     schemaVersion: 5,
     platform: 'win32-x64',
@@ -158,10 +170,10 @@ function windowsPortableManifest(baseline: BaselineFixture, sourceDigest: string
         subject: 'archive',
         inspectionMode: 'file-metadata-only',
         status: 'present',
-        resources: [{ path: 'DeepShell.Agent_0.1.4_x64-portable.zip', bytes: 512, sha256: 'f'.repeat(64) }],
+        resources: [{ path: archiveName, bytes: archiveBytes, sha256: archiveSha256 }],
         runtimePlatforms: [],
-        size: { bytes: 512, files: 1 },
-        sha256: 'f'.repeat(64),
+        size: { bytes: archiveBytes, files: 1 },
+        sha256: archiveSha256,
       },
       {
         subject: 'extracted',
@@ -183,14 +195,51 @@ function windowsPortableManifest(baseline: BaselineFixture, sourceDigest: string
   }
 }
 
+function windowsInstalledTreeManifest(baseline: BaselineFixture, sourceDigest: string) {
+  return {
+    schemaVersion: 5,
+    platform: 'win32-x64',
+    mode: 'release',
+    applicationVersion: '0.1.4',
+    artifactKind: 'windows-installed-tree',
+    windowsSourceInputSha256: sourceDigest,
+    binarySourceInputSha256: sourceDigest,
+    inspections: [
+      {
+        subject: 'windows-installed-tree',
+        inspectionMode: 'exact-installed-tree',
+        status: 'present',
+        resources: [{ path: 'deepshell-agent.exe', bytes: 1, sha256: 'a'.repeat(64) }],
+        runtimePlatforms: ['win32-x64'],
+        size: { bytes: 340329016, files: 27426 },
+        contentSha256: '1'.repeat(64),
+      },
+    ],
+    baseline: {
+      status: baseline.artifacts.windowsInstalledTree.status,
+      canonicalSourceRef: 'v0.1.3',
+      canonicalSourceCommit: baseline.canonicalSource.peeledCommit,
+      baselineSourceInputSha256: baseline.canonicalSource.baselineSourceInputSha256,
+      algorithmVersion: baseline.measurement.algorithm,
+      treeContentSha256: baseline.artifacts.windowsInstalledTree.contentSha256,
+    },
+  }
+}
+
 async function runWindowsNsisReportCase(temporary: string, output: string, baseline: BaselineFixture) {
   const { installer, installerBytes, installerSha256 } = await writeWindowsNsisInstaller(temporary)
+  const portableArchive = resolve(temporary, 'DeepShell.Agent_0.1.4_x64-portable.zip')
+  await writeFile(portableArchive, 'portable')
+  const portableBytes = await readFile(portableArchive)
+  const portableSha256 = createHash('sha256').update(portableBytes).digest('hex')
   const sourceDigest = await platformInputDigest(workspace, 'win32-x64')
   const manifest = windowsNsisManifest(baseline, installer, installerBytes, installerSha256, sourceDigest)
   const manifestPath = resolve(temporary, 'manifest.json')
   await writeFile(manifestPath, JSON.stringify(manifest))
   const portableManifestPath = resolve(temporary, 'portable-manifest.json')
-  await writeFile(portableManifestPath, JSON.stringify(windowsPortableManifest(baseline, sourceDigest)))
+  await writeFile(portableManifestPath, JSON.stringify(
+    windowsPortableManifest(baseline, sourceDigest, basename(portableArchive), portableBytes.length, portableSha256),
+  ))
 
   await runPackageReport([
     '--version', '0.1.4',
@@ -198,6 +247,7 @@ async function runWindowsNsisReportCase(temporary: string, output: string, basel
     '--windows-installer', installer,
     '--package-manifest', manifestPath,
     '--portable-manifest', portableManifestPath,
+    '--portable-archive', portableArchive,
   ])
 
   const report = JSON.parse(await readFile(resolve(output, 'package-report.json'), 'utf8'))
@@ -206,7 +256,7 @@ async function runWindowsNsisReportCase(temporary: string, output: string, basel
   expect(report.assets.windowsInstaller.baselineStatus).toBe(baseline.artifacts.windowsNsis.status)
   expect(report.assets.windowsInstaller.deltaBytes).toBe(installerBytes.length - baseline.artifacts.windowsNsis.bytes)
   expect(report.assets.windowsPortable.status).toBe('present')
-  expect(report.assets.windowsPortable.archive.sha256).toBe('f'.repeat(64))
+  expect(report.assets.windowsPortable.archive.sha256).toBe(portableSha256)
   expect(report.assets.windowsPortable.staging.contentSha256).toBe('e'.repeat(64))
   expect(report.assets.runtimeNode.bytes).toBe(106774079)
   expect(report.assets.runtimeNode.files).toBe(1994)
@@ -218,10 +268,16 @@ async function runWindowsNsisReportCase(temporary: string, output: string, basel
 
 async function runWindowsStrictNsisCase(temporary: string, baseline: BaselineFixture) {
   const { installer, installerBytes, installerSha256 } = await writeWindowsNsisInstaller(temporary)
+  const portableArchive = resolve(temporary, 'DeepShell.Agent_0.1.4_x64-portable.zip')
+  await writeFile(portableArchive, 'portable')
+  const portableBytes = await readFile(portableArchive)
+  const portableSha256 = createHash('sha256').update(portableBytes).digest('hex')
   const sourceDigest = await platformInputDigest(workspace, 'win32-x64')
   const baseManifest = windowsNsisManifest(baseline, installer, installerBytes, installerSha256, sourceDigest)
   const portableManifestPath = resolve(temporary, 'portable-manifest.json')
-  await writeFile(portableManifestPath, JSON.stringify(windowsPortableManifest(baseline, sourceDigest)))
+  await writeFile(portableManifestPath, JSON.stringify(
+    windowsPortableManifest(baseline, sourceDigest, basename(portableArchive), portableBytes.length, portableSha256),
+  ))
   const wrongKind = { ...baseManifest, artifactKind: 'windows-installed-tree' }
   const staleBaseline = { ...baseManifest, baseline: { ...baseManifest.baseline, artifactSha256: '0'.repeat(64) } }
   const foreignRuntime = {
@@ -248,6 +304,7 @@ async function runWindowsStrictNsisCase(temporary: string, baseline: BaselineFix
       '--windows-installer', installer,
       '--package-manifest', path,
       '--portable-manifest', portableManifestPath,
+      '--portable-archive', portableArchive,
     ])).rejects.toThrow()
   }
 }
@@ -379,17 +436,23 @@ describe('v0.1.4 打包契约', () => {
       'Other_0.1.4_x64-portable.zip',
     ]
     expect(isWindowsPortableZipName(names[2], '0.1.4')).toBe(true)
-    expect(isWindowsPortableZipName('DeepShell Agent_0.1.4_x64-portable.zip', '0.1.4')).toBe(true)
+    expect(isWindowsPortableZipName('DeepShell Agent_0.1.4_x64-portable.zip', '0.1.4')).toBe(false)
     expect(isWindowsPortableZipName(names[0], '0.1.4')).toBe(false)
     expect(isWindowsPortableZipName(names[1], '0.1.4')).toBe(false)
     expect(isWindowsPortableZipName(names[3], '0.1.4')).toBe(false)
     expect(isWindowsPortableZipName(names[4], '0.1.4')).toBe(false)
     expect(selectWindowsPortableZipName([names[2]], '0.1.4')).toBe(names[2])
     expect(selectWindowsPortableZipName([names[0], names[1], names[3], names[4]], '0.1.4')).toBeNull()
-    expect(() => selectWindowsPortableZipName([names[2], 'DeepShell Agent_0.1.4_x64-portable.zip'], '0.1.4'))
-      .toThrow('存在多个候选')
+    expect(selectWindowsPortableZipName([names[2], 'DeepShell Agent_0.1.4_x64-portable.zip'], '0.1.4'))
+      .toBe(names[2])
     expect(() => assertArtifactNameMatchesVersion(names[0], '0.1.4', 'Windows portable ZIP', isWindowsPortableZipName))
       .toThrow('版本不一致')
+    expect(() => assertArtifactNameMatchesVersion(
+      'DeepShell Agent_0.1.4_x64-portable.zip',
+      '0.1.4',
+      'Windows portable ZIP',
+      isWindowsPortableZipName,
+    )).toThrow('版本不一致')
   })
 
   it('便携 staging 布局与 allowlist 目标路径约束', () => {
@@ -641,6 +704,196 @@ describe('v0.1.4 打包契约', () => {
       await rm(temporary, { recursive: true, force: true })
     }
   })
+
+  it('combined Windows report 判定区分 Windows 原生输入与跨设备输入', () => {
+    expect(isCombinedWindowsPackageReportInput({
+      hostPlatform: 'win32',
+      args: [
+        'node',
+        'scripts/collect-package-report.mjs',
+        '--package-manifest', 'package-release-win32-x64-nsis.json',
+        '--windows-installer', 'DeepShell Agent_0.1.4_x64-setup.exe',
+        '--portable-manifest', 'package-release-win32-x64-portable.json',
+        '--portable-archive', 'DeepShell.Agent_0.1.4_x64-portable.zip',
+      ],
+    })).toBe(false)
+
+    for (const args of [
+      ['--windows-installer', 'DeepShell Agent_0.1.4_x64-setup.exe'],
+      ['--windows-portable', 'DeepShell.Agent_0.1.4_x64-portable.zip'],
+      ['--windows-nsis-manifest', 'package-release-win32-x64-nsis.json'],
+      ['--windows-installed-tree-manifest', 'package-release-win32-x64-installed-tree.json'],
+      ['--windows-portable-manifest', 'package-release-win32-x64-portable.json'],
+    ]) {
+      expect(isCombinedWindowsPackageReportInput({ hostPlatform: 'darwin', args })).toBe(true)
+    }
+
+    expect(isCombinedWindowsPackageReportInput({
+      hostPlatform: 'win32',
+      args: [
+        '--windows-nsis-manifest', 'package-release-win32-x64-nsis.json',
+        '--windows-installed-tree-manifest', 'package-release-win32-x64-installed-tree.json',
+        '--windows-portable-manifest', 'package-release-win32-x64-portable.json',
+      ],
+    })).toBe(true)
+  })
+
+  it.skipIf(process.platform !== 'darwin')('macOS C0 可显式导入 Windows 三类 schema 5 manifest 并生成 combined package report', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-report-combined-'))
+    try {
+      const output = resolve(temporary, 'release')
+      await mkdir(output, { recursive: true })
+      const baseline = JSON.parse(await readFile(resolve(workspace, 'tests/fixtures/package-size-baselines/v0.1.3.json'), 'utf8'))
+      const macSourceDigest = await platformInputDigest(workspace, 'darwin-arm64')
+      const windowsSourceDigest = await platformInputDigest(workspace, 'win32-x64')
+
+      const app = resolve(temporary, 'DeepShell Agent.app')
+      await mkdir(resolve(app, 'runtime/node/darwin-arm64/bin'), { recursive: true })
+      await writeFile(resolve(app, 'runtime/node/darwin-arm64/bin/node'), 'node')
+      const appTree = await normalizedTreeManifest(app)
+      const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
+      await writeFile(dmg, 'dmg')
+      const dmgBytes = await readFile(dmg)
+      const dmgSha256 = createHash('sha256').update(dmgBytes).digest('hex')
+      const macosAppManifest = {
+        schemaVersion: 5,
+        platform: 'darwin-arm64',
+        mode: 'release',
+        applicationVersion: '0.1.4',
+        artifactKind: 'macos-app',
+        macosSourceInputSha256: macSourceDigest,
+        binarySourceInputSha256: macSourceDigest,
+        inspections: [{
+          subject: 'macos-app',
+          inspectionMode: 'exact-artifact-tree',
+          status: 'present',
+          resources: [{ path: 'runtime/node/darwin-arm64/bin/node', bytes: 4, sha256: 'a'.repeat(64) }],
+          runtimePlatforms: ['darwin-arm64'],
+          size: { bytes: appTree.bytes, files: appTree.files },
+          contentSha256: appTree.contentSha256,
+        }],
+        baseline: {
+          status: baseline.artifacts.macosApp.status,
+          canonicalSourceRef: 'v0.1.3',
+          canonicalSourceCommit: baseline.canonicalSource.peeledCommit,
+          baselineSourceInputSha256: baseline.canonicalSource.baselineSourceInputSha256,
+          algorithmVersion: baseline.measurement.algorithm,
+          treeContentSha256: baseline.artifacts.macosApp.contentSha256,
+        },
+      }
+      const macosDmgManifest = {
+        schemaVersion: 5,
+        platform: 'darwin-arm64',
+        mode: 'release',
+        applicationVersion: '0.1.4',
+        artifactKind: 'macos-dmg',
+        macosSourceInputSha256: macSourceDigest,
+        binarySourceInputSha256: macSourceDigest,
+        inspections: [{
+          subject: 'macos-dmg',
+          inspectionMode: 'file-metadata-only',
+          status: 'present',
+          resources: [{ path: 'DeepShell Agent_0.1.4_aarch64.dmg', bytes: dmgBytes.length, sha256: dmgSha256 }],
+          runtimePlatforms: [],
+          size: { bytes: dmgBytes.length, files: 1 },
+          sha256: dmgSha256,
+        }],
+        baseline: {
+          status: baseline.artifacts.macosDmg.status,
+          canonicalSourceRef: 'v0.1.3',
+          canonicalSourceCommit: baseline.canonicalSource.peeledCommit,
+          baselineSourceInputSha256: baseline.canonicalSource.baselineSourceInputSha256,
+          algorithmVersion: baseline.measurement.algorithm,
+          artifactSha256: baseline.artifacts.macosDmg.sha256,
+        },
+      }
+      const { installer, installerBytes, installerSha256 } = await writeWindowsNsisInstaller(temporary)
+      const portableArchive = resolve(temporary, 'DeepShell.Agent_0.1.4_x64-portable.zip')
+      await writeFile(portableArchive, 'portable')
+      const portableBytes = await readFile(portableArchive)
+      const portableSha256 = createHash('sha256').update(portableBytes).digest('hex')
+      const manifestPaths = {
+        macosApp: resolve(temporary, 'macos-app.json'),
+        macosDmg: resolve(temporary, 'macos-dmg.json'),
+        windowsNsis: resolve(temporary, 'windows-nsis.json'),
+        windowsInstalledTree: resolve(temporary, 'windows-installed-tree.json'),
+        windowsPortable: resolve(temporary, 'windows-portable.json'),
+      }
+      await writeFile(manifestPaths.macosApp, JSON.stringify(macosAppManifest))
+      await writeFile(manifestPaths.macosDmg, JSON.stringify(macosDmgManifest))
+      await writeFile(manifestPaths.windowsNsis, JSON.stringify(
+        windowsNsisManifest(baseline, installer, installerBytes, installerSha256, windowsSourceDigest),
+      ))
+      await writeFile(manifestPaths.windowsInstalledTree, JSON.stringify(
+        windowsInstalledTreeManifest(baseline, windowsSourceDigest),
+      ))
+      await writeFile(manifestPaths.windowsPortable, JSON.stringify(
+        windowsPortableManifest(baseline, windowsSourceDigest, basename(portableArchive), portableBytes.length, portableSha256),
+      ))
+
+      await runPackageReport([
+        '--version', '0.1.4',
+        '--output-dir', output,
+        '--app', app,
+        '--dmg', dmg,
+        '--windows-installer', installer,
+        '--windows-portable', portableArchive,
+        '--package-manifest', manifestPaths.macosApp,
+        '--dmg-manifest', manifestPaths.macosDmg,
+        '--windows-nsis-manifest', manifestPaths.windowsNsis,
+        '--windows-installed-tree-manifest', manifestPaths.windowsInstalledTree,
+        '--windows-portable-manifest', manifestPaths.windowsPortable,
+      ])
+
+      const report = JSON.parse(await readFile(resolve(output, 'package-report.json'), 'utf8'))
+      expect(report.assets.app.status).toBe('present')
+      expect(report.assets.dmg.status).toBe('present')
+      expect(report.assets.windowsInstaller.sha256).toBe(installerSha256)
+      expect(report.assets.windowsInstalledTree.deltaBytes).toBe(340329016 - baseline.artifacts.windowsInstalledTree.bytes)
+      expect(report.assets.windowsPortable.archive.sha256).toBe(portableSha256)
+      expect(report.manifests.releaseWindowsNsisManifest.status).toBe('present')
+      expect(report.manifests.releaseWindowsInstalledTreeManifest.status).toBe('present')
+      expect(report.manifests.releasePortableManifest.status).toBe('present')
+      expect(report.foreignRuntimePaths).toEqual([])
+
+      await expect(runPackageReport([
+        '--version', '0.1.4',
+        '--output-dir', resolve(temporary, 'missing-explicit-asset'),
+        '--app', app,
+        '--dmg', dmg,
+        '--package-manifest', manifestPaths.macosApp,
+        '--dmg-manifest', manifestPaths.macosDmg,
+        '--windows-nsis-manifest', manifestPaths.windowsNsis,
+        '--windows-portable-manifest', manifestPaths.windowsPortable,
+      ])).rejects.toThrow(/输入不完整/)
+
+      await expect(runPackageReport([
+        '--version', '0.1.4',
+        '--output-dir', resolve(temporary, 'single-windows-arg'),
+        '--app', app,
+        '--dmg', dmg,
+        '--package-manifest', manifestPaths.macosApp,
+        '--dmg-manifest', manifestPaths.macosDmg,
+        '--windows-installer', installer,
+      ])).rejects.toThrow(/输入不完整/)
+
+      await expect(runPackageReport([
+        '--version', '0.1.4',
+        '--output-dir', resolve(temporary, 'missing-windows-manifest-path'),
+        '--app', app,
+        '--dmg', dmg,
+        '--windows-installer', installer,
+        '--windows-portable', portableArchive,
+        '--package-manifest', manifestPaths.macosApp,
+        '--dmg-manifest', manifestPaths.macosDmg,
+        '--windows-nsis-manifest', resolve(temporary, 'missing-windows-nsis.json'),
+        '--windows-installed-tree-manifest', manifestPaths.windowsInstalledTree,
+        '--windows-portable-manifest', manifestPaths.windowsPortable,
+      ])).rejects.toThrow(/显式路径不存在/)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  }, 15_000)
 
   it('release package report 默认拒绝缺失、错 kind、过期 baseline 和异平台 runtime', async () => {
     const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-report-strict-'))

@@ -64,9 +64,12 @@ describe('构建输入指纹', () => {
     expect(platformSourceInputs['win32-x64']).toContain('src-tauri/tauri.windows.conf.json')
     expect(platformSourceInputs['darwin-arm64']).toContain('scripts/lib/package-manifest.mjs')
     expect(platformSourceInputs['win32-x64']).toContain('scripts/lib/package-manifest.mjs')
+    expect(platformSourceInputs['darwin-arm64']).toContain('scripts/lib/package-report-mode.mjs')
+    expect(platformSourceInputs['win32-x64']).toContain('scripts/lib/package-report-mode.mjs')
     for (const declaration of [
       'scripts/lib/artifact-selection.d.mts',
       'scripts/lib/package-manifest.d.mts',
+      'scripts/lib/package-report-mode.d.mts',
       'scripts/lib/package-platform.d.mts',
       'scripts/lib/package-size.d.mts',
       'scripts/lib/process-plan.d.mts',

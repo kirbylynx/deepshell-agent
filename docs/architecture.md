@@ -465,7 +465,7 @@ Package verification must compare E2E and Release artifacts to prove test-only c
 
 > ⚠️ **Known `v0.1.3` gap (`REL-022`)**: that released baseline does not satisfy the first rule above. Its Windows NSIS package contains both `runtime/node/darwin-arm64` and `runtime/node/win32-x64`; the **4,800-file / 187.5 MB macOS runtime is entirely unused on Windows** (the installed tree totals 32,226 files / 512.03 MB). The macOS `.app` has the symmetric `win32-x64` waste.
 >
-> The active `v0.1.4` branch implements both platform paths with platform-specific Tauri configuration and verification rules; its macOS `.app` contains only `darwin-arm64` Node, and the Windows side landed with Windows x64 on-device acceptance recorded in `docs/releases/v0.1.4.md` (WIN-01…WIN-13 measured on real Windows 11 x64). The macOS final joint regression (C0) and release closeout are still pending, so the cross-platform feature must not be described as complete until C0 records the macOS side.
+> The active `v0.1.4` branch implements both platform paths with platform-specific Tauri configuration and verification rules; its macOS `.app` contains only `darwin-arm64` Node. The Windows side has partial on-device acceptance recorded in `docs/releases/v0.1.4.md`: the main packaging, launch/exit, uninstall, portable ZIP, single-instance, menu, no-trace, and size-gate matrices were measured on real Windows 11 x64, while session creation in WIN-02/WIN-03, UI-level shared-session reading in WIN-04, and representative old-session upgrade in WIN-13 remain not run. The macOS final joint regression (C0) and release closeout are still pending, so the cross-platform feature must not be described as complete until C0 records the macOS side.
 
 ### 9.4 Updates and migration
 

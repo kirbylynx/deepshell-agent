@@ -33,6 +33,8 @@
 export const WindowsStatusCode = Object.freeze({
   /** 已在真机上完成端到端验收，且有验收记录文档。 */
   AcceptedOnDevice: 'accepted-on-device',
+  /** 已在真机上完成主要矩阵，但仍存在明确的人工项或未运行子项。 */
+  PartiallyAcceptedOnDevice: 'partially-accepted-on-device',
   /** 本版本没有真机验收记录——**不得**声称已验收。 */
   NotRecorded: 'not-recorded-for-this-version'
 })
@@ -45,6 +47,8 @@ export const windowsStatusCodes = Object.freeze(Object.values(WindowsStatusCode)
  * 状态码不在此渲染——notes 面向人，manifest 面向机器。
  */
 const ACCEPTED_SUMMARY = 'accepted end-to-end on real Windows 11 hardware'
+const PARTIAL_ACCEPTED_SUMMARY =
+  'partially accepted on real Windows 11 hardware; some session/UI/upgrade checks remain manual or not run'
 
 /** 未登记版本在 notes 中使用的说明（明确、可搜索、不含任何上一版本的说法）。 */
 const UNRECORDED_NOTE =
@@ -58,6 +62,8 @@ const NO_UNFIXED_DEFECTS = 'none for this version'
  *
  * @type {Record<string, {
  *   record: string,
+ *   statusCode?: string,
+ *   summary?: string,
  *   scope: string,
  *   unfixed: { id: string, summary: string }[]
  * }>}
@@ -76,11 +82,13 @@ export const windowsAcceptance = {
   },
   '0.1.4': {
     record: 'docs/releases/v0.1.4.md',
+    statusCode: WindowsStatusCode.PartiallyAcceptedOnDevice,
+    summary: PARTIAL_ACCEPTED_SUMMARY,
     // 注意：这里只写**稳定的量级**。精确的 bytes/delta 记录在 release 文档与
     // manifest/package-report 中；若在此处写精确数字，而本文件属于构建输入 digest，
     // 就会出现"改数字 → digest 变化 → 重建后数字再变"的循环。
     scope:
-      'WIN-01 to WIN-13 measured on real Windows 11 x64: per-platform runtime trimming (installed tree reduced by about 196.6 MB and 4800 files; NSIS reduced by about 27.6 MB), portable ZIP distribution, native File/Help menu, exit-path hardening, and the pre-uninstall cleanup whose end-to-end matrix removes the install tree completely even with an orphan Sidecar; session creation and UI-level data sharing remain manual items',
+      'Windows main packaging matrix measured on real Windows 11 x64: per-platform runtime trimming (installed tree reduced by about 196.6 MB and 4800 files; NSIS reduced by about 27.6 MB), portable ZIP distribution, native File/Help menu, exit-path hardening, and the pre-uninstall cleanup whose end-to-end matrix removes the install tree completely even with an orphan Sidecar; session creation, UI-level session reading, and representative old-session upgrade remain manual or not run items',
     unfixed: [
       { id: 'REL-025', summary: 'quarantined-record retirement on macOS (Windows side landed)' },
       { id: 'REL-026', summary: 'drag-and-drop' },
@@ -118,7 +126,8 @@ export function windowsNotesLine(version) {
     acceptance.unfixed.length === 0
       ? NO_UNFIXED_DEFECTS
       : acceptance.unfixed.map(item => `${item.id} (${item.summary})`).join(', ')
-  return `- Windows x64: ${ACCEPTED_SUMMARY} for v${version} (see ${acceptance.record}). Known unfixed defects ship with this version: ${unfixed}.`
+  const summary = acceptance.summary ?? ACCEPTED_SUMMARY
+  return `- Windows x64: ${summary} for v${version} (see ${acceptance.record}). Known unfixed defects ship with this version: ${unfixed}.`
 }
 
 /**
@@ -144,8 +153,8 @@ export function windowsManifestFields(version) {
     }
   }
   return {
-    windowsStatusCode: WindowsStatusCode.AcceptedOnDevice,
-    windowsStatusSummary: ACCEPTED_SUMMARY,
+    windowsStatusCode: acceptance.statusCode ?? WindowsStatusCode.AcceptedOnDevice,
+    windowsStatusSummary: acceptance.summary ?? ACCEPTED_SUMMARY,
     windowsAcceptanceRecord: acceptance.record,
     windowsAcceptanceScope: `v${version}: ${acceptance.scope}`
   }

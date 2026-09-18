@@ -18,6 +18,23 @@ function run(command, args) {
   })
 }
 
+function forwardedArgs(names) {
+  const output = []
+  for (const name of names) {
+    const prefix = `${name}=`
+    const inline = process.argv.find(value => value.startsWith(prefix))
+    if (inline) {
+      output.push(name, inline.slice(prefix.length))
+      continue
+    }
+    const index = process.argv.indexOf(name)
+    if (index >= 0 && process.argv[index + 1] !== undefined) {
+      output.push(name, process.argv[index + 1])
+    }
+  }
+  return output
+}
+
 const pnpm = process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'
 const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
 
@@ -37,6 +54,13 @@ if (process.platform === 'darwin') {
     '--dmg', `src-tauri/target/release/bundle/dmg/DeepShell Agent_${pkg.version}_aarch64.dmg`,
     '--package-manifest', 'runtime/staging/package-release-darwin-arm64-macos-app.json',
     '--dmg-manifest', 'runtime/staging/package-release-darwin-arm64-macos-dmg.json',
+    ...forwardedArgs([
+      '--windows-installer',
+      '--windows-portable',
+      '--windows-nsis-manifest',
+      '--windows-installed-tree-manifest',
+      '--windows-portable-manifest',
+    ]),
   ])
   await run('node', ['scripts/verify-package-size.mjs'])
 } else if (process.platform === 'win32') {

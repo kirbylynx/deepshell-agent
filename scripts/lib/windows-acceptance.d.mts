@@ -6,6 +6,8 @@ export interface WindowsAcceptanceUnfixedDefect {
 export interface RecordedWindowsAcceptance {
   recorded: true
   record: string
+  statusCode?: string
+  summary?: string
   scope: string
   unfixed: WindowsAcceptanceUnfixedDefect[]
 }
@@ -16,6 +18,7 @@ export interface UnrecordedWindowsAcceptance {
 
 export const WindowsStatusCode: {
   readonly AcceptedOnDevice: 'accepted-on-device'
+  readonly PartiallyAcceptedOnDevice: 'partially-accepted-on-device'
   readonly NotRecorded: 'not-recorded-for-this-version'
 }
 
@@ -23,6 +26,8 @@ export const windowsStatusCodes: readonly string[]
 
 export const windowsAcceptance: Record<string, {
   record: string
+  statusCode?: string
+  summary?: string
   scope: string
   unfixed: WindowsAcceptanceUnfixedDefect[]
 }>

@@ -5,6 +5,7 @@ import { redactedJson } from './lib/redaction.mjs'
 import { normalizedTreeManifest } from './lib/tree-manifest.mjs'
 import { platformInputDigest } from './lib/source-inputs.mjs'
 import { summarizeInspections, validatePackageManifestV5 } from './lib/package-manifest.mjs'
+import { isCombinedWindowsPackageReportInput } from './lib/package-report-mode.mjs'
 import {
   assertArtifactNameMatchesVersion,
   isMacosDmgName,
@@ -18,6 +19,10 @@ function argValue(name, fallback) {
   if (inline) return inline.slice(prefix.length)
   const index = process.argv.indexOf(name)
   return index >= 0 ? process.argv[index + 1] : fallback
+}
+
+function hasArg(name) {
+  return process.argv.some(value => value === name || value.startsWith(`${name}=`))
 }
 
 async function exists(path) {
@@ -61,6 +66,21 @@ async function optionalJson(path) {
     if (error?.code === 'ENOENT') return null
     throw error
   }
+}
+
+async function requiredJson(path, label) {
+  try {
+    return JSON.parse(await readFile(path, 'utf8'))
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      throw new Error(`${label} 显式路径不存在：${path}`)
+    }
+    throw error
+  }
+}
+
+function requireCombinedWindowsArgument(condition, message) {
+  if (!condition) throw new Error(`combined Windows package report 输入不完整：${message}`)
 }
 
 const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
@@ -114,19 +134,53 @@ const releaseDmgManifest = process.platform === 'darwin' && dmgManifestArgument 
   ? await optionalJson(resolve(dmgManifestArgument))
   : null
 const portableManifestArgument = argValue('--portable-manifest', resolve(root, 'runtime/staging/package-release-win32-x64-windows-portable.json'))
-const releasePortableManifest = process.platform === 'win32' && portableManifestArgument !== 'none'
-  ? await optionalJson(resolve(portableManifestArgument))
+const windowsNsisManifestArgument = argValue('--windows-nsis-manifest', undefined)
+const windowsInstalledTreeManifestArgument = argValue('--windows-installed-tree-manifest', undefined)
+const windowsPortableManifestArgument = argValue('--windows-portable-manifest', portableManifestArgument)
+const portableManifestExplicit = hasArg('--portable-manifest') || hasArg('--windows-portable-manifest')
+const combinedWindowsInputExplicit = isCombinedWindowsPackageReportInput({
+  args: process.argv,
+  hostPlatform: process.platform,
+})
+if (combinedWindowsInputExplicit) {
+  requireCombinedWindowsArgument(windowsNsisManifestArgument !== undefined, '缺少 --windows-nsis-manifest')
+  requireCombinedWindowsArgument(windowsInstalledTreeManifestArgument !== undefined, '缺少 --windows-installed-tree-manifest')
+  requireCombinedWindowsArgument(hasArg('--windows-portable-manifest'), '缺少 --windows-portable-manifest')
+  requireCombinedWindowsArgument(windowsInstallerArg !== undefined, '缺少 --windows-installer')
+  requireCombinedWindowsArgument(hasArg('--windows-portable'), '缺少 --windows-portable')
+}
+const releaseWindowsNsisManifest = windowsNsisManifestArgument === undefined
+  ? null
+  : await requiredJson(resolve(windowsNsisManifestArgument), 'Windows NSIS manifest')
+const releaseWindowsInstalledTreeManifest = windowsInstalledTreeManifestArgument === undefined
+  ? null
+  : await requiredJson(resolve(windowsInstalledTreeManifestArgument), 'Windows installed-tree manifest')
+const releasePortableManifest = windowsPortableManifestArgument !== 'none' &&
+    (process.platform === 'win32' || portableManifestExplicit)
+  ? portableManifestExplicit
+      ? await requiredJson(resolve(windowsPortableManifestArgument), 'Windows portable manifest')
+      : await optionalJson(resolve(windowsPortableManifestArgument))
   : null
 // portable archive 的磁盘一致性策略：
 // - 生产默认路径（未显式传 --portable-manifest）：必须与 bundle 下的 ZIP 一致，缺失即失败；
 // - 外部传入的 manifest（测试/组合流程）：磁盘上不保证存在同名 ZIP，仅在显式提供
 //   `--portable-archive <zip>` 时比对。
-const portableManifestExplicit = process.argv.some(value => value === '--portable-manifest' || value.startsWith('--portable-manifest='))
-const portableArchiveArgument = argValue('--portable-archive', undefined)
+const portableArchiveArgument = argValue('--windows-portable', argValue('--portable-archive', undefined))
+if (combinedWindowsInputExplicit) {
+  if (!await exists(windowsInstaller)) {
+    throw new Error(`Windows installer 显式路径不存在：${windowsInstaller}`)
+  }
+  const portableArchivePath = resolve(portableArchiveArgument)
+  if (!await exists(portableArchivePath)) {
+    throw new Error(`Windows portable ZIP 显式路径不存在：${portableArchivePath}`)
+  }
+}
 const enforcePortableArchiveOnDisk = !portableManifestExplicit || portableArchiveArgument !== undefined
 const runtimePlatform = currentRuntimePlatform()
-const currentSourceInputSha256 = await platformInputDigest(root, runtimePlatform)
-const sourceDigestField = runtimePlatform === 'darwin-arm64' ? 'macosSourceInputSha256' : 'windowsSourceInputSha256'
+const sourceInputSha256ByPlatform = {
+  'darwin-arm64': await platformInputDigest(root, 'darwin-arm64'),
+  'win32-x64': await platformInputDigest(root, 'win32-x64'),
+}
 const expectedReleaseArtifactKind = runtimePlatform === 'darwin-arm64' ? 'macos-app' : 'nsis-installer'
 
 function baselineForArtifactKind(artifactKind) {
@@ -134,6 +188,7 @@ function baselineForArtifactKind(artifactKind) {
     'macos-app': baselineFixture?.artifacts?.macosApp,
     'macos-dmg': baselineFixture?.artifacts?.macosDmg,
     'nsis-installer': baselineFixture?.artifacts?.windowsNsis,
+    'windows-installed-tree': baselineFixture?.artifacts?.windowsInstalledTree,
   }[artifactKind] ?? null
 }
 
@@ -149,7 +204,11 @@ function incompatibleManifestSummary(label, manifest, reasons) {
   }
 }
 
-function manifestSummary(manifest, label, expectedArtifactKind, required) {
+function sourceDigestFieldForPlatform(platform) {
+  return platform === 'darwin-arm64' ? 'macosSourceInputSha256' : 'windowsSourceInputSha256'
+}
+
+function manifestSummary(manifest, label, expectedArtifactKind, required, expectedPlatform = runtimePlatform) {
   if (manifest === null) {
     if (required && !allowMissingReleaseManifests) {
       throw new Error(`${label} 缺失，release package report 必须基于当前 schema 5 manifest`)
@@ -160,9 +219,10 @@ function manifestSummary(manifest, label, expectedArtifactKind, required) {
   const reasons = []
   if (manifest.mode !== 'release') reasons.push(`mode=${manifest.mode}`)
   if (manifest.applicationVersion !== version) reasons.push(`version=${manifest.applicationVersion}`)
-  if (manifest.platform !== runtimePlatform) reasons.push(`platform=${manifest.platform}`)
+  if (manifest.platform !== expectedPlatform) reasons.push(`platform=${manifest.platform}`)
   if (manifest.artifactKind !== expectedArtifactKind) reasons.push(`artifactKind=${manifest.artifactKind}`)
-  if (manifest[sourceDigestField] !== currentSourceInputSha256) reasons.push('source input digest 已过期')
+  const sourceDigestField = sourceDigestFieldForPlatform(expectedPlatform)
+  if (manifest[sourceDigestField] !== sourceInputSha256ByPlatform[expectedPlatform]) reasons.push('source input digest 已过期')
   if (baselineFixture === null) {
     reasons.push('baseline fixture 缺失')
   } else {
@@ -205,6 +265,21 @@ const releasePortableManifestSummary = manifestSummary(
   'portable package manifest',
   'windows-portable',
   runtimePlatform === 'win32-x64',
+  'win32-x64',
+)
+const releaseWindowsNsisManifestSummary = manifestSummary(
+  releaseWindowsNsisManifest,
+  'Windows NSIS package manifest',
+  'nsis-installer',
+  false,
+  'win32-x64',
+)
+const releaseWindowsInstalledTreeManifestSummary = manifestSummary(
+  releaseWindowsInstalledTreeManifest,
+  'Windows installed-tree package manifest',
+  'windows-installed-tree',
+  false,
+  'win32-x64',
 )
 function presentManifest(manifest, summary) {
   return manifest !== null && summary.status === 'present' ? manifest : null
@@ -233,6 +308,7 @@ function baselineArtifactFor(assetKey) {
     app: baselineFixture.artifacts?.macosApp,
     dmg: baselineFixture.artifacts?.macosDmg,
     windowsInstaller: baselineFixture.artifacts?.windowsNsis,
+    windowsInstalledTree: baselineFixture.artifacts?.windowsInstalledTree,
     runtimeNode: baselineFixture.sourceTrees?.[runtimeNodeKey],
     runtimeDsh: baselineFixture.sourceTrees?.dsh,
     profileTemplate: baselineFixture.sourceTrees?.profileTemplate,
@@ -254,9 +330,9 @@ function attachBaselineDelta(metric, assetKey) {
 }
 
 function foreignRuntimePathsFromManifests(manifests) {
-  const expected = runtimePlatform
   const paths = new Set()
   for (const manifest of manifests.filter(Boolean)) {
+    const expected = manifest.platform
     for (const inspection of manifest.inspections ?? []) {
       for (const resource of inspection.resources ?? []) {
         const match = resource.path.match(/(^|\/)runtime\/node\/([^/]+)(\/|$)/)
@@ -270,20 +346,35 @@ function foreignRuntimePathsFromManifests(manifests) {
 const validReleaseManifest = presentManifest(releaseManifest, releaseManifestSummary)
 const validReleaseDmgManifest = presentManifest(releaseDmgManifest, releaseDmgManifestSummary)
 const validReleasePortableManifest = presentManifest(releasePortableManifest, releasePortableManifestSummary)
+const validReleaseWindowsNsisManifest = presentManifest(releaseWindowsNsisManifest, releaseWindowsNsisManifestSummary)
+const validReleaseWindowsInstalledTreeManifest = presentManifest(
+  releaseWindowsInstalledTreeManifest,
+  releaseWindowsInstalledTreeManifestSummary,
+)
 const fallbackAppMetrics = await directoryMetrics(appPath)
 const fallbackDmgMetrics = await dmgMetric()
 const fallbackWindowsInstallerMetrics = await windowsInstallerMetric()
 const appMetrics = attachBaselineDelta(inspectionMetric(validReleaseManifest, 'macos-app') ?? fallbackAppMetrics, 'app')
 const dmgMetrics = attachBaselineDelta(inspectionMetric(validReleaseDmgManifest, 'macos-dmg') ?? fallbackDmgMetrics, 'dmg')
 const windowsInstallerMetrics = attachBaselineDelta(
-  inspectionMetric(validReleaseManifest, 'nsis-installer') ?? fallbackWindowsInstallerMetrics,
+  inspectionMetric(validReleaseWindowsNsisManifest, 'nsis-installer') ??
+    inspectionMetric(validReleaseManifest, 'nsis-installer') ??
+    fallbackWindowsInstallerMetrics,
   'windowsInstaller',
+)
+const windowsInstalledTreeMetrics = attachBaselineDelta(
+  inspectionMetric(validReleaseWindowsInstalledTreeManifest, 'windows-installed-tree') ??
+    { status: 'missing' },
+  'windowsInstalledTree',
 )
 // portable 为首版：只记录 staging/archive/extracted 三方指标，不做 v0.1.3 基线比较（REQ-1408）。
 const portableStagingMetrics = inspectionMetric(validReleasePortableManifest, 'staging')
 const portableArchiveMetrics = inspectionMetric(validReleasePortableManifest, 'archive')
 const portableExtractedMetrics = inspectionMetric(validReleasePortableManifest, 'extracted')
 if (validReleasePortableManifest !== null) {
+  if (portableManifestExplicit && portableArchiveArgument === undefined) {
+    throw new Error('显式 Windows portable manifest 必须同时提供 --windows-portable 或 --portable-archive 以校验 ZIP 资产')
+  }
   // 三个 subject 必须存在：缺失时不能静默记录 null（与 verify-package-size 的存在性断言一致）。
   if (portableStagingMetrics === null || portableArchiveMetrics === null || portableExtractedMetrics === null) {
     throw new Error('package report 的 portable manifest 缺少 staging/archive/extracted inspection')
@@ -354,7 +445,36 @@ if (releaseManifestSummary.status === 'present' && releaseManifest.artifactKind 
     throw new Error('package report 的 Windows installer 与 manifest 不一致')
   }
 }
-const foreignRuntimePaths = foreignRuntimePathsFromManifests([validReleaseManifest, validReleaseDmgManifest])
+if (validReleaseWindowsNsisManifest !== null) {
+  if (!explicitWindowsInstaller) {
+    throw new Error('显式 Windows NSIS manifest 必须同时提供 --windows-installer 以校验安装包资产')
+  }
+  const installerInspection = validReleaseWindowsNsisManifest.inspections.find(item => item.subject === 'nsis-installer')
+  if (!installerInspection || fallbackWindowsInstallerMetrics.status !== 'present' ||
+      installerInspection.sha256 !== fallbackWindowsInstallerMetrics.sha256 ||
+      installerInspection.size?.bytes !== fallbackWindowsInstallerMetrics.bytes) {
+    throw new Error('package report 的显式 Windows installer 与 manifest 不一致')
+  }
+}
+const windowsInstalledTreeArgument = argValue('--windows-installed-tree', undefined)
+if (validReleaseWindowsInstalledTreeManifest !== null && windowsInstalledTreeArgument !== undefined) {
+  const installedTreeInspection = validReleaseWindowsInstalledTreeManifest.inspections
+    .find(item => item.subject === 'windows-installed-tree')
+  const installedTreeOnDisk = await directoryMetrics(resolve(windowsInstalledTreeArgument))
+  if (!installedTreeInspection || installedTreeOnDisk.status !== 'present' ||
+      installedTreeInspection.contentSha256 !== installedTreeOnDisk.contentSha256 ||
+      installedTreeInspection.size?.bytes !== installedTreeOnDisk.bytes ||
+      installedTreeInspection.size?.files !== installedTreeOnDisk.files) {
+    throw new Error('package report 的 Windows installed-tree 与 manifest 不一致')
+  }
+}
+const foreignRuntimePaths = foreignRuntimePathsFromManifests([
+  validReleaseManifest,
+  validReleaseDmgManifest,
+  validReleaseWindowsNsisManifest,
+  validReleaseWindowsInstalledTreeManifest,
+  validReleasePortableManifest,
+])
 if (foreignRuntimePaths.length > 0) {
   throw new Error(`package report 检测到异平台 Runtime：${foreignRuntimePaths.join(', ')}`)
 }
@@ -368,6 +488,7 @@ const report = {
     app: appMetrics,
     dmg: dmgMetrics,
     windowsInstaller: windowsInstallerMetrics,
+    windowsInstalledTree: windowsInstalledTreeMetrics,
     windowsPortable: windowsPortableMetrics,
     runtimeNode: runtimeNodeMetrics,
     runtimeDsh: runtimeDshMetrics,
@@ -377,6 +498,8 @@ const report = {
   manifests: {
     releasePackageManifest: releaseManifestSummary,
     releaseDmgManifest: releaseDmgManifestSummary,
+    releaseWindowsNsisManifest: releaseWindowsNsisManifestSummary,
+    releaseWindowsInstalledTreeManifest: releaseWindowsInstalledTreeManifestSummary,
     releasePortableManifest: releasePortableManifestSummary,
     licenseInventory: staleLicenseInventoryVersion !== null ? {
       status: 'stale-version',

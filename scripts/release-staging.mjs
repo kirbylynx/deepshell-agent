@@ -116,7 +116,7 @@ async function currentWindowsPortable(version) {
 async function copyJsonIfPresent(source, target, assets, label, version) {
   if (!await exists(source)) {
     assets.push({ label, status: 'missing', asset: basename(target) })
-    return
+    return null
   }
   const content = await readFile(source, 'utf8')
   const json = JSON.parse(content)
@@ -125,6 +125,57 @@ async function copyJsonIfPresent(source, target, assets, label, version) {
   }
   await writeFile(target, content)
   assets.push({ label, status: 'present', asset: basename(target), sha256: await sha256(target) })
+  return json
+}
+
+function presentAsset(assets, label) {
+  const asset = assets.find(item => item.label === label)
+  if (!asset || asset.status !== 'present') {
+    throw new Error(`combined release staging 要求 ${label} 资产存在，但状态为 ${asset?.status ?? 'missing'}`)
+  }
+  return asset
+}
+
+function assertPackageReportMetric(report, path, label) {
+  const value = path.reduce((current, key) => current?.[key], report)
+  if (value?.status !== 'present') {
+    throw new Error(`combined release staging 的 package report 缺少 present 指标：${label}`)
+  }
+  return value
+}
+
+function assertPackageReportSummary(report, key) {
+  const summary = report.manifests?.[key]
+  if (summary?.status !== 'present') {
+    throw new Error(`combined release staging 的 package report 缺少 present manifest summary：${key}`)
+  }
+}
+
+function assertReportShaMatchesAsset(metricSha, asset, label) {
+  if (metricSha !== asset.sha256) {
+    throw new Error(`combined release staging 的 package report ${label} sha 与 staging 资产不一致`)
+  }
+}
+
+function validateCombinedPackageReport(report, assets) {
+  if (report?.schemaVersion !== 2) {
+    throw new Error('combined release staging 要求 schemaVersion=2 的 package report')
+  }
+  const dmg = assertPackageReportMetric(report, ['assets', 'dmg'], 'assets.dmg')
+  assertPackageReportMetric(report, ['assets', 'app'], 'assets.app')
+  const windowsInstaller = assertPackageReportMetric(report, ['assets', 'windowsInstaller'], 'assets.windowsInstaller')
+  assertPackageReportMetric(report, ['assets', 'windowsInstalledTree'], 'assets.windowsInstalledTree')
+  const windowsPortable = assertPackageReportMetric(report, ['assets', 'windowsPortable'], 'assets.windowsPortable')
+  const windowsPortableArchive = assertPackageReportMetric(report, ['assets', 'windowsPortable', 'archive'], 'assets.windowsPortable.archive')
+  assertPackageReportSummary(report, 'releaseWindowsNsisManifest')
+  assertPackageReportSummary(report, 'releaseWindowsInstalledTreeManifest')
+  assertPackageReportSummary(report, 'releasePortableManifest')
+  assertReportShaMatchesAsset(dmg.sha256, presentAsset(assets, 'macos-dmg'), 'DMG')
+  assertReportShaMatchesAsset(windowsInstaller.sha256, presentAsset(assets, 'windows-nsis'), 'Windows NSIS')
+  assertReportShaMatchesAsset(windowsPortableArchive.sha256, presentAsset(assets, 'windows-portable'), 'Windows portable ZIP')
+  if (windowsPortable.archive?.status !== 'present') {
+    throw new Error('combined release staging 的 package report 缺少 present portable archive 指标')
+  }
 }
 
 export async function replaceDirectory(stagingDirectory, outputDirectory, fs = { exists, rename, rm }) {
@@ -159,7 +210,7 @@ export async function replaceDirectory(stagingDirectory, outputDirectory, fs = {
   }
 }
 
-async function writeReleaseStaging(version, outputDirectory, stagingDirectory) {
+async function writeReleaseStaging(version, outputDirectory, stagingDirectory, options = {}) {
   const assets = []
   const dmgArg = argValue('--dmg', undefined)
   const dmg = dmgArg === undefined ? await currentDmg(version) : { status: 'present', path: resolve(dmgArg) }
@@ -191,7 +242,7 @@ async function writeReleaseStaging(version, outputDirectory, stagingDirectory) {
     assets.push({ label: 'windows-portable', status: 'missing', asset: `DeepShell.Agent_${version}_x64-portable.zip` })
   } else {
     assertArtifactNameMatchesVersion(basename(windowsPortable.path), version, 'Windows portable ZIP', isWindowsPortableZipName)
-    const target = resolve(stagingDirectory, basename(windowsPortable.path))
+    const target = resolve(stagingDirectory, `DeepShell.Agent_${version}_x64-portable.zip`)
     await copyFile(windowsPortable.path, target)
     assets.push({ label: 'windows-portable', status: 'present', asset: basename(target), sha256: await sha256(target) })
   }
@@ -209,7 +260,7 @@ async function writeReleaseStaging(version, outputDirectory, stagingDirectory) {
     'sbom',
     version
   )
-  await copyJsonIfPresent(
+  const packageReport = await copyJsonIfPresent(
     resolve(argValue('--package-report', resolve(root, 'runtime/staging/package-report.json'))),
     resolve(stagingDirectory, `deepshell-agent-v${version}-package-report.json`),
     assets,
@@ -223,6 +274,9 @@ async function writeReleaseStaging(version, outputDirectory, stagingDirectory) {
     'security-audit',
     version
   )
+  if (options.validateCombinedPackageReport) {
+    validateCombinedPackageReport(packageReport, assets)
+  }
 
   const presentAssets = assets.filter(asset => asset.status === 'present')
   const sums = presentAssets.map(asset => `${asset.sha256}  ${asset.asset}`).join('\n')
@@ -276,7 +330,11 @@ export async function runReleaseStaging() {
   await mkdir(dirname(outputDirectory), { recursive: true })
   let stagingDirectory = await mkdtemp(resolve(dirname(outputDirectory), `.${basename(outputDirectory)}-tmp-`))
   try {
-    const assets = await writeReleaseStaging(version, outputDirectory, stagingDirectory)
+    const combinedPackageReportRequired = ['macos-dmg', 'windows-nsis', 'windows-portable']
+      .every(label => requiredAssets.includes(label))
+    const assets = await writeReleaseStaging(version, outputDirectory, stagingDirectory, {
+      validateCombinedPackageReport: combinedPackageReportRequired,
+    })
     for (const label of requiredAssets) {
       const asset = assets.find(item => item.label === label)
       if (!asset || asset.status !== 'present') {

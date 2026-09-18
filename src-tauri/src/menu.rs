@@ -8,9 +8,9 @@
 // 3. Windows 顶层菜单不得重复产品名（窗口标题已经显示一次），也不得出现 macOS 专属项；
 // 4. Windows `Exit` 与 macOS `Quit` 都必须经过统一安全退出入口 `request_exit`：
 //    先幂等 `stop_runtime()`，成功才退出，失败时记录脱敏错误并阻止退出。
-use tauri::menu::{
-    AboutMetadata, AboutMetadataBuilder, Menu, MenuItem, PredefinedMenuItem, Submenu,
-};
+#[cfg(not(target_os = "macos"))]
+use tauri::menu::MenuItem;
+use tauri::menu::{AboutMetadata, AboutMetadataBuilder, Menu, PredefinedMenuItem, Submenu};
 use tauri::{AppHandle, Manager, Runtime};
 
 use crate::app_state::AppState;
@@ -22,18 +22,22 @@ pub const EXIT_MENU_ID: &str = "file.exit";
 
 /// 菜单条目种类：规格只描述结构，构建时按平台映射到 Tauri 菜单项。
 ///
-/// macOS 专属变体（Services/Hide/HideOthers/Quit）在非 macOS 构建中不会出现在规格里，
-/// 因此只在该平台之外豁免 dead_code 检查。
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+/// 平台专属变体只在对应平台编译，避免 `clippy -D warnings` 把另一平台的合法死代码
+/// 当成本平台缺陷。
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ItemKind {
     /// 关于：macOS 放在应用菜单（文案交给系统），Windows 放在 Help 菜单（固定文案）。
     About,
+    #[cfg(target_os = "macos")]
     Services,
+    #[cfg(target_os = "macos")]
     Hide,
+    #[cfg(target_os = "macos")]
     HideOthers,
+    #[cfg(target_os = "macos")]
     Quit,
     /// 自定义退出项：必须路由到 `request_exit`。
+    #[cfg(not(target_os = "macos"))]
     Exit,
     Separator,
 }
@@ -129,10 +133,15 @@ pub fn build_application_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<M
                     about_label(),
                     Some(metadata.clone()),
                 )?),
+                #[cfg(target_os = "macos")]
                 ItemKind::Services => Box::new(PredefinedMenuItem::services(app, None)?),
+                #[cfg(target_os = "macos")]
                 ItemKind::Hide => Box::new(PredefinedMenuItem::hide(app, None)?),
+                #[cfg(target_os = "macos")]
                 ItemKind::HideOthers => Box::new(PredefinedMenuItem::hide_others(app, None)?),
+                #[cfg(target_os = "macos")]
                 ItemKind::Quit => Box::new(PredefinedMenuItem::quit(app, None)?),
+                #[cfg(not(target_os = "macos"))]
                 ItemKind::Exit => Box::new(MenuItem::with_id(
                     app,
                     EXIT_MENU_ID,
@@ -219,68 +228,62 @@ mod tests {
         assert!(!is_exit_menu_id(""));
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
-    fn menu_spec_matches_the_platform_convention() {
-        if cfg!(target_os = "macos") {
-            // macOS：单个应用菜单，标题是产品名，保留 About/Services/Hide/Hide Others/Quit。
-            assert_eq!(APPLICATION_MENU.len(), 1);
-            let application_menu = &APPLICATION_MENU[0];
-            assert_eq!(application_menu.label, PRODUCT_NAME);
-            assert_eq!(
-                application_menu.items,
-                &[
-                    ItemKind::About,
-                    ItemKind::Separator,
-                    ItemKind::Services,
-                    ItemKind::Separator,
-                    ItemKind::Hide,
-                    ItemKind::HideOthers,
-                    ItemKind::Separator,
-                    ItemKind::Quit,
-                ]
-            );
-        } else {
-            // Windows：恰好 File 与 Help；File 只有 Exit，Help 只有 About；
-            // 顶层菜单不得重复产品名，也不得出现 macOS 专属项。
-            let labels: Vec<&str> = APPLICATION_MENU.iter().map(|spec| spec.label).collect();
-            assert_eq!(labels, vec!["File", "Help"]);
-            let file = APPLICATION_MENU
-                .iter()
-                .find(|spec| spec.id == "file")
-                .expect("file menu");
-            assert_eq!(file.items, &[ItemKind::Exit]);
-            let help = APPLICATION_MENU
-                .iter()
-                .find(|spec| spec.id == "help")
-                .expect("help menu");
-            assert_eq!(help.items, &[ItemKind::About]);
-            for spec in APPLICATION_MENU {
-                assert_ne!(spec.label, PRODUCT_NAME, "Windows 顶层菜单不得重复产品名");
-                for item in spec.items {
-                    assert!(
-                        !matches!(
-                            item,
-                            ItemKind::Services
-                                | ItemKind::Hide
-                                | ItemKind::HideOthers
-                                | ItemKind::Quit
-                        ),
-                        "Windows 菜单不得包含 macOS 专属项"
-                    );
-                }
-            }
+    fn menu_spec_matches_macos_convention() {
+        // macOS：单个应用菜单，标题是产品名，保留 About/Services/Hide/Hide Others/Quit。
+        assert_eq!(APPLICATION_MENU.len(), 1);
+        let application_menu = &APPLICATION_MENU[0];
+        assert_eq!(application_menu.label, PRODUCT_NAME);
+        assert_eq!(
+            application_menu.items,
+            &[
+                ItemKind::About,
+                ItemKind::Separator,
+                ItemKind::Services,
+                ItemKind::Separator,
+                ItemKind::Hide,
+                ItemKind::HideOthers,
+                ItemKind::Separator,
+                ItemKind::Quit,
+            ]
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn menu_spec_matches_non_macos_convention() {
+        // Windows：恰好 File 与 Help；File 只有 Exit，Help 只有 About；
+        // 顶层菜单不得重复产品名，且 macOS 专属项不会在此平台编译。
+        let labels: Vec<&str> = APPLICATION_MENU.iter().map(|spec| spec.label).collect();
+        assert_eq!(labels, vec!["File", "Help"]);
+        let file = APPLICATION_MENU
+            .iter()
+            .find(|spec| spec.id == "file")
+            .expect("file menu");
+        assert_eq!(file.items, &[ItemKind::Exit]);
+        let help = APPLICATION_MENU
+            .iter()
+            .find(|spec| spec.id == "help")
+            .expect("help menu");
+        assert_eq!(help.items, &[ItemKind::About]);
+        for spec in APPLICATION_MENU {
+            assert_ne!(spec.label, PRODUCT_NAME, "Windows 顶层菜单不得重复产品名");
         }
     }
 
     #[test]
     fn exit_item_uses_a_stable_id() {
         assert_eq!(EXIT_MENU_ID, "file.exit");
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn non_macos_menu_contains_exit_item() {
         // 非 macOS 菜单必须包含 Exit 项（Windows 的退出路径依赖它）。
-        if !cfg!(target_os = "macos") {
-            let has_exit = APPLICATION_MENU
-                .iter()
-                .any(|spec| spec.items.contains(&ItemKind::Exit));
-            assert!(has_exit, "非 macOS 菜单必须提供 Exit 项");
-        }
+        let has_exit = APPLICATION_MENU
+            .iter()
+            .any(|spec| spec.items.contains(&ItemKind::Exit));
+        assert!(has_exit, "非 macOS 菜单必须提供 Exit 项");
     }
 }

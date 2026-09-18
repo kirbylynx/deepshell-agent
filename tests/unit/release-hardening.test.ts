@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { access, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -13,6 +14,36 @@ async function runNode(args: string[]) {
     cwd: root,
     maxBuffer: 32 * 1024 * 1024
   })
+}
+
+function sha256Text(value: string) {
+  return createHash('sha256').update(value).digest('hex')
+}
+
+function combinedPackageReport(version: string, shas: {
+  dmg: string
+  installer: string
+  portable: string
+}, options: { omitInstalledTree?: boolean, portableShaOverride?: string } = {}) {
+  return {
+    schemaVersion: 2,
+    application: { name: 'DeepShell Agent', version },
+    assets: {
+      app: { status: 'present' },
+      dmg: { status: 'present', sha256: shas.dmg },
+      windowsInstaller: { status: 'present', sha256: shas.installer },
+      ...(options.omitInstalledTree ? {} : { windowsInstalledTree: { status: 'present' } }),
+      windowsPortable: {
+        status: 'present',
+        archive: { status: 'present', sha256: options.portableShaOverride ?? shas.portable },
+      },
+    },
+    manifests: {
+      releaseWindowsNsisManifest: { status: 'present' },
+      releaseWindowsInstalledTreeManifest: { status: 'present' },
+      releasePortableManifest: { status: 'present' },
+    },
+  }
 }
 
 describe('v0.1.1 release hardening scripts', () => {
@@ -61,10 +92,8 @@ describe('v0.1.1 release hardening scripts', () => {
       await writeFile(resolve(dsh, 'dsh.txt'), 'dsh')
       await writeFile(resolve(profile, 'profile.txt'), 'profile')
       const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
-      const windowsInstaller = resolve(temporary, 'DeepShell Agent_0.1.4_x64-setup.exe')
       const license = resolve(temporary, 'license-inventory.json')
       await writeFile(dmg, 'dmg')
-      await writeFile(windowsInstaller, 'windows')
       await writeFile(license, '{"application":{"version":"0.1.4"}}\n')
       const output = resolve(temporary, 'release')
 
@@ -74,7 +103,6 @@ describe('v0.1.1 release hardening scripts', () => {
         '--output-dir', output,
         '--app', app,
         '--dmg', dmg,
-        '--windows-installer', windowsInstaller,
         '--runtime-node', node,
         '--runtime-dsh', dsh,
         '--profile-template', profile,
@@ -88,7 +116,7 @@ describe('v0.1.1 release hardening scripts', () => {
       const report = JSON.parse(reportText)
       expect(report.assets.app.status).toBe('present')
       expect(report.assets.dmg.asset).toBe('DeepShell Agent_0.1.4_aarch64.dmg')
-      expect(report.assets.windowsInstaller.asset).toBe('DeepShell Agent_0.1.4_x64-setup.exe')
+      expect(report.assets.windowsInstaller.status).toBe('missing')
       expect(reportText).not.toContain(temporary)
       expect(reportText).not.toContain(root)
     } finally {
@@ -122,17 +150,14 @@ describe('v0.1.1 release hardening scripts', () => {
       await writeFile(resolve(dsh, 'dsh.txt'), 'dsh')
       await writeFile(resolve(profile, 'profile.txt'), 'profile')
       const dmg = resolve(temporary, `DeepShell Agent_${version}_aarch64.dmg`)
-      const windowsInstaller = resolve(temporary, `DeepShell Agent_${version}_x64-setup.exe`)
       const support = resolve(temporary, 'support.json')
       await writeFile(dmg, 'dmg')
-      await writeFile(windowsInstaller, 'windows')
       await writeFile(support, `{"application":{"version":"${version}"}}\n`)
       await runNode([
         'scripts/collect-package-report.mjs',
         '--version', version,
         '--app', app,
         '--dmg', dmg,
-        '--windows-installer', windowsInstaller,
         '--runtime-node', node,
         '--runtime-dsh', dsh,
         '--profile-template', profile,
@@ -145,6 +170,8 @@ describe('v0.1.1 release hardening scripts', () => {
       await expect(access(staleReleaseReport)).rejects.toThrow()
 
       const output = resolve(temporary, 'release')
+      const windowsInstaller = resolve(temporary, `DeepShell Agent_${version}_x64-setup.exe`)
+      await writeFile(windowsInstaller, 'windows')
       await runNode([
         'scripts/release-staging.mjs',
         '--version', version,
@@ -511,6 +538,25 @@ describe('v0.1.1 release hardening scripts', () => {
     }
   })
 
+  it('release staging 拒绝带空格产品名的 portable ZIP，固定最终 basename', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-portable-space-'))
+    try {
+      const portable = resolve(temporary, 'DeepShell Agent_0.1.4_x64-portable.zip')
+      await writeFile(portable, 'portable')
+
+      await expect(runNode([
+        'scripts/release-staging.mjs',
+        '--version', '0.1.4',
+        '--output-dir', resolve(temporary, 'release'),
+        '--dmg-dir', resolve(temporary, 'dmg'),
+        '--windows-installer-dir', resolve(temporary, 'nsis'),
+        '--windows-portable', portable,
+      ])).rejects.toThrow(/版本不一致/)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
   it('release staging --require-assets 在资产缺失时失败且不产出快照', async () => {
     const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-require-assets-'))
     try {
@@ -538,6 +584,101 @@ describe('v0.1.1 release hardening scripts', () => {
 
       // 校验失败必须发生在替换 output 之前：不得留下半成品快照。
       expect(await access(output).then(() => true, () => false)).toBe(false)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('combined release staging 校验 package report 的指标、manifest summary 和资产 sha', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-combined-report-'))
+    try {
+      const version = '0.1.4'
+      const output = resolve(temporary, 'release')
+      const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
+      const installer = resolve(temporary, 'DeepShell Agent_0.1.4_x64-setup.exe')
+      const portable = resolve(temporary, 'DeepShell.Agent_0.1.4_x64-portable.zip')
+      const support = resolve(temporary, 'support.json')
+      const report = resolve(temporary, 'package-report.json')
+      await writeFile(dmg, 'dmg')
+      await writeFile(installer, 'installer')
+      await writeFile(portable, 'portable')
+      await writeFile(support, `{"application":{"version":"${version}"}}\n`)
+      await writeFile(report, JSON.stringify({
+        ...combinedPackageReport(version, {
+          dmg: sha256Text('dmg'),
+          installer: sha256Text('installer'),
+          portable: sha256Text('portable'),
+        }),
+        application: { name: 'DeepShell Agent', version },
+      }))
+
+      await runNode([
+        'scripts/release-staging.mjs',
+        '--version', version,
+        '--output-dir', output,
+        '--dmg', dmg,
+        '--windows-installer', installer,
+        '--windows-portable', portable,
+        '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
+        '--license-inventory', support,
+        '--sbom', support,
+        '--package-report', report,
+        '--security-audit', support,
+      ])
+
+      const manifest = JSON.parse(await readFile(resolve(output, 'release-manifest.json'), 'utf8'))
+      expect(manifest.assets.find((asset: { label: string }) => asset.label === 'package-report').status).toBe('present')
+      expect(await readFile(resolve(output, 'DeepShell.Agent_0.1.4_x64-portable.zip'), 'utf8')).toBe('portable')
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('combined release staging 拒绝不完整或哈希不匹配的 package report', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-combined-report-fail-'))
+    try {
+      const version = '0.1.4'
+      const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
+      const installer = resolve(temporary, 'DeepShell Agent_0.1.4_x64-setup.exe')
+      const portable = resolve(temporary, 'DeepShell.Agent_0.1.4_x64-portable.zip')
+      const support = resolve(temporary, 'support.json')
+      const incompleteReport = resolve(temporary, 'incomplete-report.json')
+      const mismatchedReport = resolve(temporary, 'mismatched-report.json')
+      const shas = {
+        dmg: sha256Text('dmg'),
+        installer: sha256Text('installer'),
+        portable: sha256Text('portable'),
+      }
+      await writeFile(dmg, 'dmg')
+      await writeFile(installer, 'installer')
+      await writeFile(portable, 'portable')
+      await writeFile(support, `{"application":{"version":"${version}"}}\n`)
+      await writeFile(incompleteReport, JSON.stringify(combinedPackageReport(version, shas, { omitInstalledTree: true })))
+      await writeFile(mismatchedReport, JSON.stringify(combinedPackageReport(version, shas, {
+        portableShaOverride: '0'.repeat(64),
+      })))
+
+      const baseArgs = [
+        'scripts/release-staging.mjs',
+        '--version', version,
+        '--dmg', dmg,
+        '--windows-installer', installer,
+        '--windows-portable', portable,
+        '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
+        '--license-inventory', support,
+        '--sbom', support,
+        '--security-audit', support,
+      ]
+      await expect(runNode([
+        ...baseArgs,
+        '--output-dir', resolve(temporary, 'release-incomplete'),
+        '--package-report', incompleteReport,
+      ])).rejects.toThrow(/package report/)
+      await expect(runNode([
+        ...baseArgs,
+        '--output-dir', resolve(temporary, 'release-mismatch'),
+        '--package-report', mismatchedReport,
+      ])).rejects.toThrow(/sha/)
     } finally {
       await rm(temporary, { recursive: true, force: true })
     }
@@ -643,6 +784,10 @@ describe('v0.1.1 release hardening scripts', () => {
       const accepted = windowsManifestFields('0.1.3')
       expect(windowsStatusCodes).toContain(accepted.windowsStatusCode)
       expect(accepted.windowsStatusCode).toBe(WindowsStatusCode.AcceptedOnDevice)
+      const partiallyAccepted = windowsManifestFields('0.1.4')
+      expect(windowsStatusCodes).toContain(partiallyAccepted.windowsStatusCode)
+      expect(partiallyAccepted.windowsStatusCode).toBe(WindowsStatusCode.PartiallyAcceptedOnDevice)
+      expect(partiallyAccepted.windowsStatusSummary).toContain('partially accepted')
       expect(windowsStatusCodes).toContain(manifest.windowsStatusCode)
       // 状态码本身不含空格等自然语言特征，避免机器契约再次被文案污染
       expect(accepted.windowsStatusCode).not.toMatch(/\s/)

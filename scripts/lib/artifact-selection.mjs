@@ -17,13 +17,14 @@ export function artifactNameMatchesVersion(name, version) {
 }
 
 const productNamePattern = '(?:DeepShell Agent|DeepShell\\.Agent)'
+const dottedProductNamePattern = 'DeepShell\\.Agent'
 
 export function isWindowsNsisInstallerName(name, version) {
   return new RegExp(`^${productNamePattern}_${escapedRegex(version)}_x64-setup\\.exe$`).test(name)
 }
 
 export function isWindowsPortableZipName(name, version) {
-  return new RegExp(`^${productNamePattern}_${escapedRegex(version)}_x64-portable\\.zip$`).test(name)
+  return new RegExp(`^${dottedProductNamePattern}_${escapedRegex(version)}_x64-portable\\.zip$`).test(name)
 }
 
 export function isMacosDmgName(name, version) {
