@@ -12,7 +12,7 @@ DeepShell Agent does not reimplement the Agent Runtime and does not fork the off
 
 ## Current status
 
-The latest released baseline is `v0.1.3`, which completed Windows x64 on-device acceptance. The active `v0.1.4` development branch is implementing per-platform package trimming, a Windows portable ZIP, safer Windows uninstall cleanup, and platform-specific menu presentation. It retains the pinned DeepSeek Harness `0.1.5-rc.1` runtime and the official Web UI / public extension-point architecture. Windows results for `v0.1.4` remain pending until they are built and verified on Windows hardware.
+The latest published baseline is the unsigned `v0.1.4` preview release. It completed Windows 11 x64 on-device acceptance and the final macOS arm64 regression, and adds per-platform runtime trimming, a Windows portable ZIP, safer Windows uninstall cleanup, and platform-specific native menus while retaining DeepSeek Harness `0.1.5-rc.1`, the official Web UI, and the public-extension-point architecture.
 
 Capabilities already included in the source baseline:
 
@@ -31,16 +31,16 @@ Capabilities already included in the source baseline:
 - Sidecar dynamic port, token cleanup, Ready Gate, process cleanup, and basic recovery;
 - bounded local pre-upgrade backup of `dsh-home/sessions` during the `v0.1.1` to `v0.1.2` runtime refresh;
 - redacted local diagnostics, package-size reporting, SBOM baseline, vulnerability-audit entrypoint, and release staging automation;
-- macOS E2E/Release artifact security-boundary comparison.
+- macOS E2E/Release artifact security-boundary comparison;
+- per-platform runtime packaging for macOS arm64 and Windows x64;
+- a Windows x64 NSIS installer and portable ZIP validated on real Windows 11 hardware;
+- native macOS and Windows menu layouts with safe runtime shutdown routes.
 
 Still required before formal signed/notarized public binary distribution:
 
 - macOS Developer ID signing and Apple notarization;
 - Windows code signing;
-- release-level license/NOTICE inventory review;
-- final macOS regression acceptance for the completed `v0.1.4` cross-platform artifact set;
-- the Windows uninstall-cleanup defect fix (Roadmap `REL-024`);
-- completion and real-device verification of the Windows half of per-platform runtime trimming (Roadmap `REL-022`). The active `v0.1.4` branch has implemented and rebuilt the macOS path; Windows packaging is not yet verified on Windows hardware.
+- release-level legal review of the generated license inventory and notices.
 
 Completed by `v0.1.3` (the two items previously listed here): Windows x64 on-device installer acceptance, and Windows WebView2 first-run / shutdown / process-tree cleanup acceptance. See the [v0.1.3 closeout](docs/releases/v0.1.3.md).
 
@@ -78,7 +78,7 @@ Models, routes, base URLs, API keys, and model lists are managed through the off
 
 ## Getting and running
 
-For published binaries, macOS arm64 users can download developer-preview DMGs from GitHub Releases. Formal signed/notarized packages and Windows packages are still separate release gates.
+For published binaries, use GitHub Releases. The `v0.1.4` preview release provides a macOS arm64 DMG, a Windows x64 NSIS installer, and a Windows x64 portable ZIP. These preview assets are not Developer ID/notarized or Windows code-signed.
 
 The current source baseline has not completed all formal binary-distribution gates. The public repository is primarily for source publication, architecture review, and reproducible builds. If you want to build from source, see “For contributors” below.
 
@@ -100,17 +100,21 @@ Target platform:
 - Windows 10 22H2 or Windows 11 x64;
 - WebView2 Runtime (the NSIS installer embeds the bootstrapper and installs it automatically when missing).
 
-Windows users should download the NSIS installer and install through the setup wizard.
+Windows users can use either the NSIS installer or the portable ZIP. The portable build is extracted and launched in place, shares `%APPDATA%\com.deepshell.agent` with the installed build, and requires an existing Evergreen WebView2 Runtime. Do not run installed and portable forms concurrently; the product intentionally keeps a single-instance model.
+
+The `v0.1.4` preview release completed WIN-01 through WIN-13 on real Windows 11 x64 hardware, including installed/portable session creation, UI-level session and Provider sharing in both directions, portable-directory removal with retained user data, native menu inspection, orphan-Sidecar uninstall cleanup, and representative `v0.1.3` session upgrade. See the [v0.1.4 closeout](docs/releases/v0.1.4.md).
 
 **`v0.1.3` completed end-to-end acceptance on real Windows x64 hardware** (setup wizard, first launch, data directory, credential setup, sessions and tools, single instance, dynamic ports, malicious-origin isolation, the exit-cleanup scenario tested at that time, crash recovery, diagnostics bundle, environment restoration). Acceptance found and fixed 8 Windows platform defects; see the [v0.1.3 closeout](docs/releases/v0.1.3.md).
 
 **Known limitations of the released `v0.1.3` baseline** (not to be read as current-branch passes):
 
-- **Uninstall does not clean up fully**: later Windows measurements observed orphan Sidecar processes after both normal app close and abnormal app termination. When the orphan keeps native libraries mapped, the install directory can retain 5 files / 108.54 MB, which require terminating that process and deleting them manually. This was not fixed in `v0.1.3`; the active `v0.1.4` branch tracks the fix as Roadmap `REL-024` and still needs Windows uninstall re-validation.
-- **Per-platform runtime trimming was not implemented in `v0.1.3`**: its installer bundles both the macOS and Windows Node runtimes, and the macOS half (4800 files / 187.5 MB) is entirely unused on Windows. The active `v0.1.4` branch has implemented and rebuilt the macOS path; Windows packaging and on-device verification remain pending (Roadmap `REL-022`).
+- **Uninstall does not clean up fully**: later Windows measurements observed orphan Sidecar processes after both normal app close and abnormal app termination. When the orphan keeps native libraries mapped, the install directory can retain 5 files / 108.54 MB, which require terminating that process and deleting them manually. This was not fixed in `v0.1.3`; `v0.1.4` implements and validates the `REL-024` cleanup route.
+- **Per-platform runtime trimming was not implemented in `v0.1.3`**: its installer bundles both the macOS and Windows Node runtimes, and the macOS half (4800 files / 187.5 MB) is entirely unused on Windows. `v0.1.4` implements and validates the `REL-022` macOS and Windows paths.
 - Two WebView2 matrix dimensions were not measured this round: font/CJK rendering, and the file picker / drag-and-drop / clipboard.
 - Dependency vulnerability audit is unavailable on this machine (the configured npm mirror has no audit endpoint), so **dependencies have not passed a vulnerability scan**.
 - Windows code signing is not done.
+
+The final `v0.1.4` audit found no production-root, bundled-DSH-runtime, or Rust advisories. The root development/test toolchain still reports four high and one moderate warning; these are recorded as non-blocking build-tooling findings rather than shipped-runtime findings.
 
 ## Usage
 

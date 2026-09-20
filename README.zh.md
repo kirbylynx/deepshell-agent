@@ -12,7 +12,7 @@ DeepShell Agent 不重新实现 Agent Runtime，也不 fork 官方 DSH Web UI。
 
 ## 当前状态
 
-最新已发布基线为 `v0.1.3`，已完成 Windows x64 真机验收。当前 `v0.1.4` 开发分支正在实现按平台裁剪安装包、Windows portable ZIP、更安全的 Windows 卸载清理，以及平台差异化菜单显示；继续固定使用 DeepSeek Harness `0.1.5-rc.1`，并保持官方 Web UI / 官方扩展点架构不变。`v0.1.4` 的 Windows 结果须在 Windows 真机完成构建和验证后才能确认。
+最新已公开发布基线为未签名的 `v0.1.4` preview release。该版本已完成 Windows 11 x64 真机验收与最终 macOS arm64 回归：新增按平台裁剪运行时、Windows portable ZIP、更安全的 Windows 卸载清理和平台原生菜单，同时继续固定使用 DeepSeek Harness `0.1.5-rc.1`，并保持官方 Web UI / 官方扩展点架构不变。
 
 已经纳入源码基线的能力：
 
@@ -31,16 +31,16 @@ DeepShell Agent 不重新实现 Agent Runtime，也不 fork 官方 DSH Web UI。
 - Sidecar 动态端口、token 清理、Ready Gate、进程清理和基础恢复；
 - `v0.1.1` 到 `v0.1.2` runtime refresh 期间，对 `dsh-home/sessions` 做有限本地升级前备份；
 - 本地脱敏诊断包、包体积报告、SBOM 基线、漏洞扫描入口和 release staging 自动化；
-- macOS E2E/Release 产物安全边界比较。
+- macOS E2E/Release 产物安全边界比较；
+- macOS arm64 与 Windows x64 按平台裁剪运行时打包；
+- 已在真实 Windows 11 上验收的 Windows x64 NSIS installer 与 portable ZIP；
+- 带安全 Runtime 退出路由的 macOS/Windows 原生菜单。
 
 仍需在正式签名/公证二进制公开分发前完成：
 
 - macOS Developer ID 签名和 Apple notarization；
 - Windows code signing；
-- release 级许可证/NOTICE 清单复核；
-- 完整 `v0.1.4` 跨平台产物集合的最终 macOS 回归验收；
-- Windows 卸载清理缺陷修复（Roadmap `REL-024`）；
-- 完成并在真机验证按平台裁剪运行时的 Windows 路线（Roadmap `REL-022`）。当前 `v0.1.4` 开发分支已实现并重建验证 macOS 路线，Windows 打包尚未在 Windows 真机验证。
+- 对已生成 license inventory 与 NOTICE 的 release 级法律复核。
 
 `v0.1.3` 已完成（原列于此处的两项）：Windows x64 真机安装包端到端验收、Windows WebView2 首次启动/退出/进程树清理验收，详见 [v0.1.3 收口文档](docs/releases/v0.1.3.zh.md)。
 
@@ -78,7 +78,7 @@ Office/PDF/PPTX/XLSX 原生解析、复杂知识库、企业 Connector 和专属
 
 ## 获取与运行
 
-对于已发布的二进制包，macOS arm64 用户可以从 GitHub Releases 下载 developer-preview DMG。正式签名/公证包和 Windows 包仍是独立发布门禁。
+对于已发布的二进制包，请使用 GitHub Releases。`v0.1.4` preview release 提供 macOS arm64 DMG、Windows x64 NSIS installer 与 Windows x64 portable ZIP。这些预览资产尚未完成 Developer ID/Apple 公证或 Windows 代码签名。
 
 当前源码基线的正式二进制分发门禁尚未全部完成，因此 public repository 主要用于源码公开、架构审查和可复现构建。若你从源码自行构建，请参考本文最后的 “For contributors” 章节。
 
@@ -100,17 +100,21 @@ Developer-preview DMG 已为打包流程做本地签名，但尚未完成 Develo
 - Windows 10 22H2 或 Windows 11 x64；
 - WebView2 Runtime（NSIS 安装器已内嵌引导程序，缺少时自动安装）。
 
-Windows 用户下载 NSIS installer 并按安装向导安装。
+Windows 用户可以选择 NSIS installer 或 portable ZIP。portable 版本解压后原地运行，与安装版共用 `%APPDATA%\com.deepshell.agent`，并依赖系统已有 Evergreen WebView2 Runtime。安装版与 portable 版不应并发运行；产品有意保持单实例模型。
+
+`v0.1.4` preview release 已在真实 Windows 11 x64 上完成 WIN-01 至 WIN-13，包括安装版/便携版真实会话创建、跨形态 UI 级 Session 与 Provider 双向共享、删除 portable 目录后保留用户数据、原生菜单目视、孤儿 Sidecar 卸载清理，以及代表性 `v0.1.3` 旧会话升级。详见 [v0.1.4 收口文档](docs/releases/v0.1.4.zh.md)。
 
 **`v0.1.3` 已在真实 Windows x64 真机上完成端到端验收**（安装向导、首次启动、数据目录、凭据配置、会话与工具、单实例、动态端口、恶意源隔离、当时覆盖的退出清理场景、崩溃恢复、诊断包、环境还原）。验收过程中发现并修复了 8 处 Windows 平台缺陷，详见 [v0.1.3 收口文档](docs/releases/v0.1.3.zh.md)。
 
 **以下为已发布 `v0.1.3` 基线如实记录的已知限制**（不作为当前开发分支的“已通过”）：
 
-- **卸载不干净**：后续 Windows 补充测量发现，正常关闭应用和异常终止应用后都曾观测到 Sidecar 孤儿进程。若该孤儿进程仍映射原生库，卸载后安装目录可能残留 5 个文件 / 108.54 MB，需人工终止该进程后删除。该问题未在 `v0.1.3` 修复；当前 `v0.1.4` 分支以 Roadmap `REL-024` 跟踪修复，仍需 Windows 卸载重验收；
-- **`v0.1.3` 尚未按平台裁剪运行时**：其安装包同时包含 macOS 与 Windows 两套 Node 运行时，其中 macOS 部分（4800 文件 / 187.5 MB）在 Windows 上完全无用。当前 `v0.1.4` 开发分支已实现并重建验证 macOS 路线，Windows 打包和真机验证仍待完成（见 Roadmap `REL-022`）；
+- **卸载不干净**：后续 Windows 补充测量发现，正常关闭应用和异常终止应用后都曾观测到 Sidecar 孤儿进程。若该孤儿进程仍映射原生库，卸载后安装目录可能残留 5 个文件 / 108.54 MB，需人工终止该进程后删除。该问题未在 `v0.1.3` 修复；`v0.1.4` 已实现并验收 `REL-024` 清理路线；
+- **`v0.1.3` 尚未按平台裁剪运行时**：其安装包同时包含 macOS 与 Windows 两套 Node 运行时，其中 macOS 部分（4800 文件 / 187.5 MB）在 Windows 上完全无用。`v0.1.4` 已实现并验收 `REL-022` 的 macOS 与 Windows 路线；
 - WebView2 差异矩阵中"字体与中文渲染""文件选择/拖放/剪贴板"两个维度本轮未测；
 - 依赖漏洞审计在本机不可用（所配置的 npm 镜像无 audit 端点），**因此未通过漏洞扫描**；
 - Windows code signing 未完成。
+
+最终 `v0.1.4` 审计中，production root、bundled DSH Runtime 与 Rust 均为零通告；root 的开发/测试工具链仍有 4 个 high 与 1 个 moderate 告警，按未进入交付 Runtime 的非阻塞构建工具告警记录。
 
 ## 使用方式
 

@@ -443,12 +443,12 @@ V1 baseline target:
 
 | Platform | Status |
 |---|---|
-| macOS arm64 | MVP build path available; formal public binary release still requires Developer ID signing and notarization |
-| Windows x64 | **Platform acceptance completed in `v0.1.3` on real Windows x64 hardware** for installer, first run, data directory, credentials, sessions and tools, single instance, dynamic ports, malicious-origin isolation, crash recovery, and diagnostics bundle. Exit/uninstall cleanup is not fully closed: `v0.1.3` includes a known leftover-Sidecar defect tracked as `REL-024`, and `v0.1.4` owns the follow-up fix and re-acceptance. Remaining gaps also include Windows code signing and web/code-signing-independent items listed in the `v0.1.3` closeout. |
+| macOS arm64 | `v0.1.4` release-candidate regression completed for the trimmed `.app`/DMG, native menu, About metadata, and safe Quit/window-close cleanup; formal public binary distribution still requires Developer ID signing and notarization |
+| Windows x64 | `v0.1.4` completed real Windows 11 x64 acceptance for NSIS and portable ZIP, sessions, shared data, single instance, native menus, per-platform trimming, normal exit, orphan-Sidecar uninstall cleanup, no-install traces, and representative `v0.1.3` session upgrade. Windows code signing remains a separate distribution gate. |
 | Linux | Deferred |
 | Intel macOS / Windows arm64 | Deferred unless user demand changes priority |
 
-> ⚠️ **`v0.1.3` did not run acceptance on macOS**; its runtime conclusions came from real Windows x64 hardware. The active `v0.1.4` branch has since rebuilt and verified the macOS packaging path, but the final cross-platform artifact set still requires platform-specific acceptance. A pass on either platform must not be treated as a pass on the other (`AGENTS.md` §7).
+> ⚠️ **`v0.1.3` did not run acceptance on macOS**; its runtime conclusions came from real Windows x64 hardware. The `v0.1.4` preview release later completed independent Windows x64 and macOS arm64 acceptance. This does not weaken the rule that a pass on either platform must never be treated as a pass on the other (`AGENTS.md` §7).
 
 ### 9.3 Package content rules
 
@@ -465,7 +465,7 @@ Package verification must compare E2E and Release artifacts to prove test-only c
 
 > ⚠️ **Known `v0.1.3` gap (`REL-022`)**: that released baseline does not satisfy the first rule above. Its Windows NSIS package contains both `runtime/node/darwin-arm64` and `runtime/node/win32-x64`; the **4,800-file / 187.5 MB macOS runtime is entirely unused on Windows** (the installed tree totals 32,226 files / 512.03 MB). The macOS `.app` has the symmetric `win32-x64` waste.
 >
-> The active `v0.1.4` branch implements both platform paths with platform-specific Tauri configuration and verification rules; its macOS `.app` contains only `darwin-arm64` Node. The Windows side has on-device acceptance recorded in `docs/releases/v0.1.4.md`: the packaging, launch/exit, uninstall, portable ZIP, single-instance, menu, no-trace and size-gate matrices, plus real session creation, cross-form UI-level session/provider sharing and representative v0.1.3 old-session upgrade, were all measured on real Windows 11 x64 (the former manual items were re-run on the final rebuilt artifacts). The macOS final joint regression (C0) and release closeout are still pending, so the cross-platform feature must not be described as complete until C0 records the macOS side.
+> The `v0.1.4` preview release implements and independently validates both platform paths with platform-specific Tauri configuration and verification rules. The macOS `.app` contains only `darwin-arm64` Node; the Windows installed tree and portable ZIP contain only `win32-x64` Node. Windows on-device acceptance and the final macOS C0 regression are recorded in `docs/releases/v0.1.4.md`. Developer ID signing/notarization and Windows code signing remain separate formal-distribution gates.
 
 ### 9.4 Updates and migration
 
