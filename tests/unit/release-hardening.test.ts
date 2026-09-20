@@ -793,10 +793,13 @@ describe('v0.1.1 release hardening scripts', () => {
       const accepted = windowsManifestFields('0.1.3')
       expect(windowsStatusCodes).toContain(accepted.windowsStatusCode)
       expect(accepted.windowsStatusCode).toBe(WindowsStatusCode.AcceptedOnDevice)
-      const partiallyAccepted = windowsManifestFields('0.1.4')
-      expect(windowsStatusCodes).toContain(partiallyAccepted.windowsStatusCode)
-      expect(partiallyAccepted.windowsStatusCode).toBe(WindowsStatusCode.PartiallyAcceptedOnDevice)
-      expect(partiallyAccepted.windowsStatusSummary).toContain('partially accepted')
+      // 历史状态码保留在稳定枚举中（枚举只能追加，不得移除或改写语义）。
+      expect(windowsStatusCodes).toContain(WindowsStatusCode.PartiallyAcceptedOnDevice)
+      // 0.1.4 已在 W7 后的最终构建上补齐全部人工验收项并完成完整验收。
+      const finalAccepted = windowsManifestFields('0.1.4')
+      expect(windowsStatusCodes).toContain(finalAccepted.windowsStatusCode)
+      expect(finalAccepted.windowsStatusCode).toBe(WindowsStatusCode.AcceptedOnDevice)
+      expect(finalAccepted.windowsStatusSummary).toContain('accepted')
       expect(windowsStatusCodes).toContain(manifest.windowsStatusCode)
       // 状态码本身不含空格等自然语言特征，避免机器契约再次被文案污染
       expect(accepted.windowsStatusCode).not.toMatch(/\s/)
