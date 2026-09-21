@@ -1,0 +1,3 @@
+- insert:
+    - id: sea-external-probe
+      name: '@deepshell-agent/sea-external-plugin-fixture'

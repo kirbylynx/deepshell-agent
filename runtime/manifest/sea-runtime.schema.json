@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schemaVersion", "runtimeFormat", "applicationVersion", "platform", "finalizedForPackage", "executable", "buildReceipt", "nativeInventory", "dsh", "node", "packager"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "runtimeFormat": { "const": "enhanced-sea" },
+    "applicationVersion": { "const": "0.1.5" },
+    "platform": { "enum": ["darwin-arm64", "win32-x64"] },
+    "finalizedForPackage": { "type": "boolean" },
+    "executable": { "$ref": "#/$defs/file" },
+    "buildReceipt": { "$ref": "#/$defs/digestFile" },
+    "nativeInventory": { "$ref": "#/$defs/digestFile" },
+    "dsh": {
+      "type": "object",
+      "required": ["package", "version", "patches"],
+      "properties": {
+        "package": { "const": "@deepseek-ai/dsh" },
+        "version": { "const": "0.1.5-rc.2" },
+        "patches": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "type": "object",
+              "required": ["package", "version", "sha256"],
+              "properties": {
+                "package": { "const": "@deepseek-ai/dsh-client-modules" },
+                "version": { "const": "0.1.5-rc.2" },
+                "sha256": { "pattern": "^[a-f0-9]{64}$" }
+              },
+              "additionalProperties": false
+            }
+          ],
+          "items": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "node": {
+      "type": "object",
+      "required": ["version", "target", "archiveSha256"],
+      "properties": {
+        "version": { "const": "24.20.0" },
+        "target": { "enum": ["node24.20.0-macos-arm64", "node24.20.0-win-x64"] },
+        "archiveSha256": { "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "packager": {
+      "type": "object",
+      "required": ["package", "version", "patchSha256"],
+      "properties": {
+        "package": { "const": "@yao-pkg/pkg" },
+        "version": { "const": "6.22.0" },
+        "patchSha256": { "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "digestFile": {
+      "type": "object",
+      "required": ["file", "sha256"],
+      "properties": {
+        "file": { "type": "string", "pattern": "^[^/\\\\]+$" },
+        "sha256": { "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "file": {
+      "type": "object",
+      "required": ["file", "bytes", "sha256"],
+      "properties": {
+        "file": { "type": "string", "pattern": "^[^/\\\\]+$" },
+        "bytes": { "type": "integer", "minimum": 1 },
+        "sha256": { "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

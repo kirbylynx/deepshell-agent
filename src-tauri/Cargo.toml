@@ -1,6 +1,6 @@
 [package]
 name = "deepshell-agent"
-version = "0.1.4"
+version = "0.1.5"
 description = "A desktop agent powered by DeepSeek Harness."
 license = "MIT"
 edition = "2021"
@@ -15,9 +15,11 @@ tauri-build = { version = "2.6.3", features = [] }
 
 [dependencies]
 libc = "0.2"
+fs2 = "0.4.3"
 rand = "0.9"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.151"
+sha2 = "0.10"
 thiserror = "2.0.20"
 tauri = { version = "2.11.5", features = [] }
 tauri-plugin-single-instance = "2.4.4"
@@ -32,3 +34,6 @@ poc-e2e = ["dep:tauri-plugin-wdio-webdriver"]
 
 [dev-dependencies]
 tempfile = "3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem"] }

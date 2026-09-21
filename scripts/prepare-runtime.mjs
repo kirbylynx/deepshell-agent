@@ -47,6 +47,20 @@ const dshInstall = resolve(root, 'runtime/manifest/dsh-install')
 const tempRoot = resolve(cache, 'staging')
 await mkdir(cache, { recursive: true })
 
+async function applyLockedDshPatches(staging) {
+  for (const patch of lock.dsh.patches ?? []) {
+    const patchPath = resolve(root, patch.path)
+    if (await sha256(patchPath) !== patch.sha256) throw new Error(`DSH patch 摘要不一致：${patch.path}`)
+    const packageDir = resolve(staging, 'node_modules', ...patch.package.split('/'))
+    const manifest = JSON.parse(await readFile(resolve(packageDir, 'package.json'), 'utf8'))
+    if (manifest.name !== patch.package || manifest.version !== patch.version) {
+      throw new Error(`DSH patch 目标不一致：${patch.package}@${patch.version}`)
+    }
+    await run('git', ['apply', '--check', '--whitespace=nowarn', patchPath], { cwd: packageDir })
+    await run('git', ['apply', '--whitespace=nowarn', patchPath], { cwd: packageDir })
+  }
+}
+
 async function download(url, destination) {
   const response = await fetch(url)
   if (!response.ok) throw new Error(`下载失败 ${response.status}: ${url}`)
@@ -127,6 +141,7 @@ try {
   }
   if (npmCli === null) throw new Error(`未找到 npm CLI 入口，已尝试：${npmCandidates.join(' | ')}`)
   await run(node, [npmCli, 'ci', '--omit=dev', '--no-audit', '--no-fund'], { cwd: dshStaging })
+  await applyLockedDshPatches(dshStaging)
   await rm(dshTarget, { recursive: true, force: true })
   await mkdir(dshTarget, { recursive: true })
   await cp(resolve(dshStaging, 'node_modules'), resolve(dshTarget, 'node_modules'), { recursive: true, dereference: true })

@@ -1,4 +1,4 @@
-// 捕获按平台、按产物类型隔离的 package manifest（schema 5）。
+// 捕获按平台、按产物类型隔离的 package manifest（schema 6）。
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { createReadStream } from 'node:fs'
@@ -10,7 +10,8 @@ import { platformInputDigest } from './lib/source-inputs.mjs'
 import { assertEquivalentTrees, normalizedTreeManifest } from './lib/tree-manifest.mjs'
 import { packageAdapter, requireArtifactReady } from './lib/package-platform.mjs'
 import { verifyDmgContainsApp } from './lib/macos-dmg.mjs'
-import { validatePackageManifestV5 } from './lib/package-manifest.mjs'
+import { validatePackageManifestV6 } from './lib/package-manifest.mjs'
+import { loadPackageBaseline, packageBaselineArtifact } from './lib/package-baseline.mjs'
 
 const execFileAsync = promisify(execFile)
 const mode = process.argv[2]
@@ -93,29 +94,23 @@ const [
   ...configSources.map(path => readFile(resolve(root, path))),
 ])
 const configSha256 = digest(Buffer.concat(configs.flatMap((content, index) => [Buffer.from(configSources[index]), Buffer.from([0]), content, Buffer.from([0])])))
-const baselineFixture = JSON.parse(await readFile(resolve(root, 'tests/fixtures/package-size-baselines/v0.1.3.json'), 'utf8'))
+const baselineFixture = await loadPackageBaseline(root, lock.packageBaselineVersion)
 
 function runtimePlatforms(resources) {
   const platforms = new Set()
   for (const resource of resources) {
-    if (/(^|\/)runtime\/node\/darwin-arm64(\/|$)/.test(resource.path)) platforms.add('darwin-arm64')
-    if (/(^|\/)runtime\/node\/win32-x64(\/|$)/.test(resource.path)) platforms.add('win32-x64')
+    if (/(^|\/)runtime\/sea\/darwin-arm64(\/|$)/.test(resource.path)) platforms.add('darwin-arm64')
+    if (/(^|\/)runtime\/sea\/win32-x64(\/|$)/.test(resource.path)) platforms.add('win32-x64')
   }
   return [...platforms].sort()
 }
 
 function baselineFor(artifactKind) {
-  const artifact = artifactKind === 'macos-dmg'
-    ? baselineFixture.artifacts.macosDmg
-    : artifactKind === 'macos-app'
-      ? baselineFixture.artifacts.macosApp
-      : artifactKind === 'windows-installed-tree'
-        ? baselineFixture.artifacts.windowsInstalledTree
-        : artifactKind === 'nsis-installer' ? baselineFixture.artifacts.windowsNsis : null
+  const artifact = packageBaselineArtifact(baselineFixture, artifactKind)
   return {
     status: artifact?.status ?? 'pending',
     ...(artifact?.reason ? { reason: artifact.reason } : {}),
-    canonicalSourceRef: 'v0.1.3',
+    canonicalSourceRef: baselineFixture.canonicalSource.tag,
     canonicalSourceCommit: baselineFixture.canonicalSource.peeledCommit,
     ...(artifact?.sha256 ? { artifactSha256: artifact.sha256 } : {}),
     ...(artifact?.contentSha256 ? { treeContentSha256: artifact.contentSha256 } : {}),
@@ -129,8 +124,6 @@ if (adapter.platform === 'darwin') {
   const appRoot = adapter.primaryTreePath
   const appResources = resolve(appRoot, 'Contents/Resources')
   const mappings = [
-    ['runtime-node', resolve(root, 'runtime/node/darwin-arm64'), resolve(appResources, 'runtime/node/darwin-arm64'), ['darwin-arm64']],
-    ['runtime-dsh', resolve(root, 'runtime/dsh'), resolve(appResources, 'runtime/dsh'), []],
     ['profile-template', resolve(root, 'runtime/profile-template'), resolve(appResources, 'runtime/profile-template'), []],
   ]
   for (const [subject, source, target, subjectRuntimePlatforms] of mappings) {
@@ -145,6 +138,16 @@ if (adapter.platform === 'darwin') {
       contentSha256: equivalence.target.contentSha256,
     })
   }
+  const runtimeTree = await normalizedTreeManifest(resolve(appResources, 'runtime/sea/darwin-arm64'))
+  inspections.push({
+    subject: 'runtime-sea',
+    inspectionMode: 'exact-artifact-tree',
+    status: 'verified',
+    resources: runtimeTree.entries,
+    runtimePlatforms: ['darwin-arm64'],
+    size: { bytes: runtimeTree.bytes, files: runtimeTree.files },
+    contentSha256: runtimeTree.contentSha256,
+  })
   const appTree = await normalizedTreeManifest(appRoot)
   inspections.push({
     subject: 'macos-app',
@@ -196,8 +199,6 @@ if (adapter.platform === 'darwin') {
   // Runtime/DSH/Profile 子树必须与经过 runtime:verify/profile:verify 的源子树逐项等价。
   const tree = adapter.primaryTreePath
   const mappings = [
-    ['runtime-node', resolve(root, 'runtime/node/win32-x64'), resolve(tree, 'runtime/node/win32-x64'), ['win32-x64']],
-    ['runtime-dsh', resolve(root, 'runtime/dsh'), resolve(tree, 'runtime/dsh'), []],
     ['profile-template', resolve(root, 'runtime/profile-template'), resolve(tree, 'runtime/profile-template'), []],
   ]
   for (const [subject, source, target, subjectRuntimePlatforms] of mappings) {
@@ -212,8 +213,18 @@ if (adapter.platform === 'darwin') {
       contentSha256: equivalence.target.contentSha256,
     })
   }
+  const runtimeTree = await normalizedTreeManifest(resolve(tree, 'runtime/sea/win32-x64'))
+  inspections.push({
+    subject: 'runtime-sea',
+    inspectionMode: 'exact-artifact-tree',
+    status: 'verified',
+    resources: runtimeTree.entries,
+    runtimePlatforms: ['win32-x64'],
+    size: { bytes: runtimeTree.bytes, files: runtimeTree.files },
+    contentSha256: runtimeTree.contentSha256,
+  })
   const treeManifest = await normalizedTreeManifest(tree)
-  const platformMatch = path => path.match(/(^|\/)runtime\/node\/([^/]+)(\/|$)/)
+  const platformMatch = path => path.match(/(^|\/)runtime\/sea\/([^/]+)(\/|$)/)
   const foreignRuntime = treeManifest.entries.find(entry => {
     const match = platformMatch(entry.path)
     return match !== null && match[2] !== 'win32-x64'
@@ -233,8 +244,6 @@ if (adapter.platform === 'darwin') {
   const staging = adapter.primaryTreePath
   const extracted = adapter.extractedPath
   const mappings = [
-    ['runtime-node', resolve(root, 'runtime/node/win32-x64'), 'runtime/node/win32-x64', ['win32-x64']],
-    ['runtime-dsh', resolve(root, 'runtime/dsh'), 'runtime/dsh', []],
     ['profile-template', resolve(root, 'runtime/profile-template'), 'runtime/profile-template', []],
   ]
   for (const [subject, source, relativePath, subjectRuntimePlatforms] of mappings) {
@@ -250,8 +259,18 @@ if (adapter.platform === 'darwin') {
       contentSha256: stagingEquivalence.target.contentSha256,
     })
   }
+  const runtimeTree = await normalizedTreeManifest(resolve(staging, 'runtime/sea/win32-x64'))
+  inspections.push({
+    subject: 'runtime-sea',
+    inspectionMode: 'exact-artifact-tree',
+    status: 'verified',
+    resources: runtimeTree.entries,
+    runtimePlatforms: ['win32-x64'],
+    size: { bytes: runtimeTree.bytes, files: runtimeTree.files },
+    contentSha256: runtimeTree.contentSha256,
+  })
   const { source: stagingManifest, target: extractedManifest } = await assertEquivalentTrees(staging, extracted, 'portable staging/extracted')
-  const platformMatch = path => path.match(/(^|\/)runtime\/node\/([^/]+)(\/|$)/)
+  const platformMatch = path => path.match(/(^|\/)runtime\/sea\/([^/]+)(\/|$)/)
   const foreignRuntime = stagingManifest.entries.find(entry => {
     const match = platformMatch(entry.path)
     return match !== null && match[2] !== 'win32-x64'
@@ -309,6 +328,88 @@ if (adapter.platform === 'darwin') {
   platformSpecific = { linkedLibraries: adapter.linkedLibraries, signing: adapter.signing }
 }
 
+async function captureSeaRuntime() {
+  const platform = adapter.runtimePlatform()
+  const runtimeDirectory = resolve(adapter.resourcesRoot, 'runtime/sea', platform)
+  const [runtimeManifest, receipt, nativeInventory, packagedTree, receiptSha256, nativeInventorySha256] = await Promise.all([
+    readFile(resolve(runtimeDirectory, 'sea-runtime-manifest.json'), 'utf8').then(JSON.parse),
+    readFile(resolve(runtimeDirectory, 'sea-build-receipt.json'), 'utf8').then(JSON.parse),
+    readFile(resolve(runtimeDirectory, 'native-addons.json'), 'utf8').then(JSON.parse),
+    normalizedTreeManifest(runtimeDirectory),
+    hashFile(resolve(runtimeDirectory, 'sea-build-receipt.json')),
+    hashFile(resolve(runtimeDirectory, 'native-addons.json')),
+  ])
+  const executableName = platform === 'win32-x64' ? 'deepshell-runtime.exe' : 'deepshell-runtime'
+  const executablePath = resolve(runtimeDirectory, executableName)
+  const executable = { bytes: (await stat(executablePath)).size, sha256: await hashFile(executablePath) }
+  if (runtimeManifest.runtimeFormat !== 'enhanced-sea' || runtimeManifest.platform !== platform ||
+      runtimeManifest.applicationVersion !== rootPackage.version || runtimeManifest.finalizedForPackage !== true ||
+      runtimeManifest.executable?.file !== executableName || runtimeManifest.executable?.bytes !== executable.bytes ||
+      runtimeManifest.executable?.sha256 !== executable.sha256) {
+    throw new Error('包内 SEA runtime manifest 未最终化或与 executable 不一致')
+  }
+  if (receipt.sourceInputSha256 !== sourceInputSha256 || receipt.platform !== platform ||
+      receipt.dsh?.version !== lock.dsh.version || receipt.node?.version !== lock.node.version) {
+    throw new Error('包内 SEA build receipt 与当前构建输入不一致')
+  }
+  if (runtimeManifest.buildReceipt?.file !== 'sea-build-receipt.json' ||
+      runtimeManifest.buildReceipt?.sha256 !== receiptSha256 ||
+      runtimeManifest.nativeInventory?.file !== 'native-addons.json' ||
+      runtimeManifest.nativeInventory?.sha256 !== nativeInventorySha256 ||
+      nativeInventory.contentSha256 !== receipt.inventories?.native?.contentSha256) {
+    throw new Error('包内 SEA receipt/native inventory 摘要不一致')
+  }
+  let signing = 'unsigned'
+  if (adapter.platform === 'darwin') {
+    await execFileAsync('/usr/bin/codesign', ['--verify', '--strict', executablePath])
+    signing = 'signed-adhoc'
+  }
+  const packagerConfig = {
+    target: receipt.node.target,
+    mode: receipt.packager.mode,
+    compression: receipt.packager.compression,
+    useSnapshot: receipt.packager.useSnapshot,
+  }
+  return {
+    format: 'sea',
+    platform,
+    provisional: receipt.provisional,
+    sourceInputSha256: receipt.sourceInputSha256,
+    artifactSourceCommit: receipt.artifactSourceCommit,
+    dsh: runtimeManifest.dsh,
+    node: runtimeManifest.node,
+    packager: {
+      package: receipt.packager.package,
+      version: receipt.packager.version,
+      mode: receipt.packager.mode,
+      compression: receipt.packager.compression,
+      useSnapshot: receipt.packager.useSnapshot,
+      patchSha256: receipt.packager.patch.sha256,
+      configSha256: digest(JSON.stringify(packagerConfig)),
+    },
+    executable: {
+      path: `runtime/sea/${platform}/${executableName}`,
+      ...executable,
+      signing,
+    },
+    nativeInventory: {
+      file: 'native-addons.json',
+      sha256: runtimeManifest.nativeInventory.sha256,
+      files: nativeInventory.files,
+      bytes: nativeInventory.bytes,
+      contentSha256: nativeInventory.contentSha256,
+    },
+    packagedTree: {
+      files: packagedTree.files,
+      bytes: packagedTree.bytes,
+      contentSha256: packagedTree.contentSha256,
+    },
+    standardRuntimeForbiddenPaths: ['runtime/node', 'runtime/dsh'],
+  }
+}
+
+const runtime = await captureSeaRuntime()
+
 // installed-tree / portable 的完整资源清单已在 inspections 中按 subject 记录；
 // 顶层 resources 再存一份全树（数万条目）会让清单体积翻倍，且没有消费方需要它。
 const aggregateOnlyKinds = new Set(['windows-installed-tree', 'windows-portable'])
@@ -319,7 +420,7 @@ const platformDigestField = adapter.runtimePlatform() === 'darwin-arm64'
   ? 'macosSourceInputSha256'
   : 'windowsSourceInputSha256'
 const manifest = {
-  schemaVersion: 5,
+  schemaVersion: 6,
   platform: adapter.runtimePlatform(),
   applicationVersion: rootPackage.version,
   mode,
@@ -337,6 +438,7 @@ const manifest = {
   cargoFeatureTreeHasWebdriver: cargoFeatureTree.includes('tauri-plugin-wdio-webdriver'),
   [platformDigestField]: sourceInputSha256,
   binarySourceInputSha256: sourceInputSha256,
+  runtime,
   webdriverMarker: markerText.includes('deepshell-build-profile:poc-e2e'),
   e2eStopCommandMarker: markerText.includes('poc_e2e_stop_runtime'),
   ...platformSpecific,
@@ -348,7 +450,7 @@ const manifest = {
 if (!markerText.includes(`deepshell-source-input:${sourceInputSha256}`)) {
   throw new Error('package binary source receipt 与当前平台输入 digest 不一致，必须重建')
 }
-validatePackageManifestV5(manifest)
+validatePackageManifestV6(manifest)
 if (manifest.buildProfile !== (mode === 'e2e' ? 'poc-e2e' : 'release')) {
   throw new Error(`实际 binary build profile 与 ${mode} 清单不一致`)
 }
@@ -362,4 +464,4 @@ if ((adapter.platform === 'darwin' && adapter.artifactKind === 'macos-app') ||
     (adapter.platform === 'win32' && adapter.artifactKind === 'nsis-installer')) {
   await writeFile(resolve(outputDirectory, `package-${mode}.json`), serializedManifest)
 }
-console.log(`${mode} package manifest captured: ${canonicalName} (schemaVersion=5)`)
+console.log(`${mode} package manifest captured: ${canonicalName} (schemaVersion=6)`)

@@ -7,6 +7,7 @@ runtime/node/
 runtime/dsh/
 runtime/profile-template/
 runtime/staging/
+runtime/sea/
 .DS_Store
 .env
 .env.*

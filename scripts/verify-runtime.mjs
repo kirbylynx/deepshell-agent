@@ -85,4 +85,14 @@ for (const [path, expected] of Object.entries(sourceLock.packages ?? {})) {
 }
 const installed = installLock.packages?.['node_modules/@deepseek-ai/dsh']
 if (installed?.integrity !== lock.dsh.integrity) throw new Error('DSH npm integrity 与 runtime lock 不一致')
+for (const patch of lock.dsh.patches ?? []) {
+  if (await sha256(resolve(root, patch.path)) !== patch.sha256) throw new Error(`DSH patch 摘要不一致：${patch.path}`)
+  const packageDir = resolve(root, 'runtime/dsh/node_modules', ...patch.package.split('/'))
+  const manifest = JSON.parse(await readFile(resolve(packageDir, 'package.json'), 'utf8'))
+  if (manifest.version !== patch.version) throw new Error(`DSH patch 目标版本不一致：${patch.package}`)
+  const entryText = await readFile(resolve(packageDir, 'lib/index.js'), 'utf8')
+  if (!entryText.includes('managed module fallback for ${packageName} does not resolve to its target package')) {
+    throw new Error(`DSH patch 未应用：${patch.package}`)
+  }
+}
 console.log(`runtime manifest、bundled Node (${targets.join(', ')}) 与官方 DSH 入口校验通过`)

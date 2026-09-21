@@ -202,8 +202,8 @@ DeepShell Agent 是基于 DeepSeek Harness 构建的独立桌面 Agent 产品。
 - Desktop Shell：Tauri 2 + Rust
 - Web Bootstrap：Vite + TypeScript
 - UI Runtime：官方 DSH React Web UI
-- Agent Runtime：DeepSeek Harness `0.1.5-rc.1`
-- Bundled Node.js：Node.js `24.20.0`
+- Agent Runtime：DeepSeek Harness `0.1.5-rc.2`
+- 内嵌 Node.js：Node.js `24.20.0`（Release SEA）；Standard Node runtime 仅保留为开发/验证输入
 - Package Manager：pnpm `10.30.2`
 - Test：Rust test、Vitest、WebdriverIO/Tauri E2E
 
@@ -212,10 +212,10 @@ DeepShell Agent 是基于 DeepSeek Harness 构建的独立桌面 Agent 产品。
 构建流程分为三步：
 
 1. 安装开发依赖；
-2. 准备 bundled runtime 和 DSH Profile；
+2. 准备锁定的 Standard runtime 输入、DSH Profile 与当前平台 SEA Runtime；
 3. 在目标系统上构建对应平台的应用包。
 
-公开源码仓库不会提交完整 runtime、安装后的依赖树或本地构建产物。首次构建时，脚本会根据 `runtime/manifest/runtime-lock.json` 下载并校验 Node.js runtime，并根据 `runtime/manifest/dsh-install/package-lock.json` 安装锁定版本的 DSH production dependency tree。
+公开源码仓库不会提交完整 runtime、安装后的依赖树、生成的 SEA executable 或本地构建产物。首次构建时，脚本会根据 `runtime/manifest/runtime-lock.json` 下载并校验 Node.js runtime，根据 `runtime/manifest/dsh-install/package-lock.json` 安装锁定版本的 DSH production dependency tree，并构建 Release 包使用的目标平台 SEA。最终用户仍无须安装系统 Node.js。
 
 ### macOS arm64 构建
 
@@ -322,7 +322,7 @@ pnpm package:mvp
 
 说明：
 
-- Windows 上的 `pnpm package:mvp` 会调用 Tauri 构建 NSIS installer，产出 release NSIS 产物清单（`runtime/staging/package-release-win32-x64-nsis-installer.json`，`schemaVersion: 5`），并执行 Windows release manifest 的静态安全边界检查。它不会在 Windows 上执行仅属于 macOS 路线的 E2E/Release 产物比较。
+- Windows 上的 `pnpm package:mvp` 会调用 Tauri 构建 NSIS installer，产出 release NSIS 产物清单（`runtime/staging/package-release-win32-x64-nsis-installer.json`，`schemaVersion: 6`），并执行 Windows release manifest 的静态安全边界检查。它不会在 Windows 上执行仅属于 macOS 路线的 E2E/Release 产物比较。
 - NSIS 工具链**由 Tauri 自动下载**到 `%LOCALAPPDATA%\tauri\NSIS\`，无需单独安装，也无需配置系统 `PATH`；同目录还会缓存 WebView2 引导程序。
 - `v0.1.3` 已在真实 Windows x64 真机上完成 Windows installer 流水线的端到端实跑（编译 → makensis → 清单捕获 → 静态边界检查，exit 0），产物 80.41 MB。
 - 当前源码基线不包含 Windows code signing；正式二进制分发前需要单独完成。
@@ -334,6 +334,11 @@ pnpm package:mvp
 pnpm check
 pnpm runtime:smoke
 pnpm runtime:verify --target all
+pnpm runtime:sea:verify
+pnpm runtime:sea:smoke
+pnpm runtime:sea:benchmark
+pnpm runtime:sea:plugin
+pnpm runtime:sea:on-device
 pnpm profile:verify
 pnpm package:e2e
 pnpm package:mvp
@@ -353,6 +358,10 @@ pnpm security:audit
 - `pnpm check` 执行格式、Clippy、TypeScript、单元测试、契约测试、集成测试、安全测试和 profile/runtime 校验；
 - `pnpm runtime:smoke` 启动真实 DSH Web runtime，验证 loopback、token exchange、CSP、Ready Gate 和品牌插件进入 boot graph；
 - `pnpm runtime:verify --target all` 校验 macOS arm64 与 Windows x64 runtime 锁定清单；
+- `pnpm runtime:sea:verify` 校验当前平台 SEA executable、build receipt、inventories、锁定 patch 与 source-input digest；
+- `pnpm runtime:sea:smoke` 启动当前平台 SEA 并校验真实 DSH Web Ready Gate；`pnpm runtime:sea:benchmark` 在支持的真机环境记录固定的启动/RSS/Native Cache 验收矩阵；
+- `pnpm runtime:sea:plugin` 在没有系统 Node.js runtime 的条件下验证官方外部 Plugin 的发现、禁用、运行期错误隔离、加载失败 fail-closed（关闭失败）及重启恢复路线；
+- `pnpm runtime:sea:on-device` 在真机成功启动后记录当前 SEA generation 已校验的 Native Addon Cache 与控制文件占用；
 - `pnpm profile:verify` 校验 DeepShell Bundle/Profile/Preset 与官方 DSH 基线的关系；
 - `pnpm package:e2e` 构建 E2E 专用应用包并捕获产物清单；
 - `pnpm package:mvp` 是平台感知打包脚本：

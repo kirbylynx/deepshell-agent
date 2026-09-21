@@ -5,6 +5,7 @@ mod logging;
 pub mod maintenance;
 mod menu;
 mod paths;
+mod runtime_cache;
 mod sidecar;
 mod webview;
 

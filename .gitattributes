@@ -2,3 +2,6 @@
 
 *.bat text eol=crlf
 *.cmd text eol=crlf
+
+# pnpm 补丁是嵌套 diff；其中的 `+ ` 空行属于补丁内容，不是源码尾随空格。
+patches/*.patch -whitespace

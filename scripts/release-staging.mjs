@@ -149,6 +149,9 @@ function assertPackageReportSummary(report, key) {
   if (summary?.status !== 'present') {
     throw new Error(`combined release staging 的 package report 缺少 present manifest summary：${key}`)
   }
+  if (summary.runtime?.provisional !== false) {
+    throw new Error(`combined release staging 拒绝 provisional Runtime：${key}`)
+  }
 }
 
 function assertReportShaMatchesAsset(metricSha, asset, label) {
@@ -158,8 +161,17 @@ function assertReportShaMatchesAsset(metricSha, asset, label) {
 }
 
 function validateCombinedPackageReport(report, assets) {
-  if (report?.schemaVersion !== 2) {
-    throw new Error('combined release staging 要求 schemaVersion=2 的 package report')
+  if (report?.schemaVersion !== 3) {
+    throw new Error('combined release staging 要求 schemaVersion=3 的 package report')
+  }
+  if (report.runtime?.provisional !== false || report.runtimeAcceptance?.status !== 'present' ||
+      report.runtimeAcceptance?.passed !== true) {
+    throw new Error('combined release staging 要求非 provisional Runtime 和已通过的 Runtime acceptance')
+  }
+  if (report.firstRunFootprint?.status !== 'present' ||
+      !Number.isSafeInteger(report.firstRunFootprint.total?.files) ||
+      !Number.isSafeInteger(report.firstRunFootprint.total?.bytes)) {
+    throw new Error('combined release staging 要求完整的首次运行总占用汇总')
   }
   const dmg = assertPackageReportMetric(report, ['assets', 'dmg'], 'assets.dmg')
   assertPackageReportMetric(report, ['assets', 'app'], 'assets.app')
@@ -167,6 +179,8 @@ function validateCombinedPackageReport(report, assets) {
   assertPackageReportMetric(report, ['assets', 'windowsInstalledTree'], 'assets.windowsInstalledTree')
   const windowsPortable = assertPackageReportMetric(report, ['assets', 'windowsPortable'], 'assets.windowsPortable')
   const windowsPortableArchive = assertPackageReportMetric(report, ['assets', 'windowsPortable', 'archive'], 'assets.windowsPortable.archive')
+  assertPackageReportSummary(report, 'releasePackageManifest')
+  assertPackageReportSummary(report, 'releaseDmgManifest')
   assertPackageReportSummary(report, 'releaseWindowsNsisManifest')
   assertPackageReportSummary(report, 'releaseWindowsInstalledTreeManifest')
   assertPackageReportSummary(report, 'releasePortableManifest')

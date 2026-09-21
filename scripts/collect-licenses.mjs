@@ -44,7 +44,9 @@ for (const name of [...new Set(directNames)].sort()) {
     name,
     version: manifest.version,
     license: manifest.license ?? 'UNDECLARED',
-    scope: rootPackage.dependencies?.[name] ? 'build-and-runtime-client' : 'build-or-test-only'
+    scope: name === '@yao-pkg/pkg'
+      ? 'embedded-sea-bootstrap'
+      : rootPackage.dependencies?.[name] ? 'build-and-runtime-client' : 'build-or-test-only'
   })
 }
 
@@ -71,11 +73,18 @@ const output = {
   application: { name: 'DeepShell Agent', version: rootPackage.version },
   bundledNode: {
     version: lock.node.version,
+    distributionLicensePath: 'licenses/Node.js-LICENSE',
     licenseFiles: Object.fromEntries(
       Object.keys(lock.node.targets).map(target => [target, `runtime/node/${target}/LICENSE`])
     )
   },
   bundledDshNpmPackages: runtimePackages,
+  embeddedSeaPackager: {
+    name: lock.sea.packager.package,
+    version: lock.sea.packager.version,
+    patchSha256: lock.sea.packager.patch.sha256,
+    distributionLicensePath: 'licenses/yao-pkg-LICENSE'
+  },
   directBuildAndTestNpmPackages: buildPackages,
   rustRegistryPackages: rustPackages,
   notes: [

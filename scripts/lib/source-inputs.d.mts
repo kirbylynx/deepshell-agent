@@ -1,5 +1,6 @@
 export const packageSourceInputs: string[]
 export const v013BaselineSourceInputs: string[]
+export const v014BaselineSourceInputs: string[]
 export const platformSourceInputs: Record<'darwin-arm64' | 'win32-x64', string[]>
 
 export function deterministicInputDigest(

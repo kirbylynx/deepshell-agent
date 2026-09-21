@@ -4,27 +4,37 @@ import { resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { currentRuntimePlatform, nodeExecutablePath, readLock, root } from './lib/runtime.mjs'
+import { seaRuntimePaths } from './lib/sea-runtime.mjs'
 
 const lock = await readLock()
 const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-smoke-'))
 const dshHome = resolve(temporary, 'dsh-home')
 const workspace = resolve(temporary, 'bootstrap-workspace')
 const readyFile = resolve(temporary, 'client-ready.json')
+const processHome = resolve(temporary, 'process-home')
+const nativeCache = resolve(temporary, 'native-cache')
 await cp(resolve(root, 'runtime/profile-template'), dshHome, { recursive: true })
-await mkdir(workspace, { recursive: true })
+await Promise.all([mkdir(workspace, { recursive: true }), mkdir(processHome, { recursive: true }), mkdir(nativeCache, { recursive: true })])
 const instanceId = randomUUID()
 const hostTarget = currentRuntimePlatform()
+const runtimeIndex = process.argv.indexOf('--runtime')
+const runtimeMode = runtimeIndex >= 0 ? process.argv[runtimeIndex + 1] : 'standard'
+if (!['standard', 'sea'].includes(runtimeMode)) throw new Error(`不支持的 smoke runtime：${runtimeMode}`)
+const executable = runtimeMode === 'sea' ? seaRuntimePaths(hostTarget).executable : nodeExecutablePath(lock, hostTarget)
+const runtimeArgs = runtimeMode === 'sea'
+  ? ['web', '--no-open', '--host', '127.0.0.1', '--port', '0']
+  : [resolve(root, 'runtime/dsh', lock.dsh.entry), 'web', '--no-open', '--host', '127.0.0.1', '--port', '0']
 
 const child = spawn(
-  nodeExecutablePath(lock, hostTarget),
-  [resolve(root, 'runtime/dsh', lock.dsh.entry), 'web', '--no-open', '--host', '127.0.0.1', '--port', '0'],
+  executable,
+  runtimeArgs,
   {
     cwd: workspace,
     detached: process.platform !== 'win32',
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
       PATH: process.env.PATH ?? (process.platform === 'win32' ? 'C:\\Windows\\System32;C:\\Windows' : '/usr/bin:/bin'),
-      HOME: process.env.HOME,
+      HOME: processHome,
       LANG: process.env.LANG ?? 'en_US.UTF-8',
       DSH_HOME: dshHome,
       DSH_PERMISSION_MODE: 'workspace-write',
@@ -32,7 +42,8 @@ const child = spawn(
       DSH_TELEMETRY_DISABLED: '1',
       DSH_CLIENT_TITLE: 'DeepShell Agent',
       DSH_DESKTOP_INSTANCE_ID: instanceId,
-      DSH_DESKTOP_READY_FILE: readyFile
+      DSH_DESKTOP_READY_FILE: readyFile,
+      ...(runtimeMode === 'sea' ? { PKG_NATIVE_CACHE_PATH: nativeCache } : {})
     }
   }
 )
@@ -71,8 +82,9 @@ try {
   const html = await index.text()
   if (!html.includes('Content-Security-Policy')) throw new Error('DSH 页面未注入 CSP')
   if (!html.includes('__DEEPSHELL_INSTANCE_ID__')) throw new Error('DSH 页面未注入实例绑定信息')
+  if (!html.includes('@deepseek-ai/dsh-client-modules')) throw new Error('官方 Client Modules 未进入 Web boot graph')
   if (!html.includes('@deepshell-agent/dsh-desktop')) throw new Error('Branding Client Plugin 未进入官方 boot graph')
-  console.log(JSON.stringify({ ok: true, host: '127.0.0.1', dynamicPort: true, authCookie: true, csp: true, instanceBound: true, brandingGraph: true }))
+  console.log(JSON.stringify({ ok: true, runtime: runtimeMode, host: '127.0.0.1', dynamicPort: true, authCookie: true, csp: true, instanceBound: true, officialClientGraph: true, brandingGraph: true }))
 } finally {
   if (process.platform === 'win32') {
     try { spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }) } catch {}

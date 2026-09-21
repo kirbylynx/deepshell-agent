@@ -1,11 +1,11 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "DeepShell Agent",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "identifier": "com.deepshell.agent",
   "build": {
     "beforeDevCommand": "pnpm runtime:prepare && pnpm profile:prepare && pnpm dev:vite",
-    "beforeBuildCommand": "pnpm runtime:prepare && pnpm profile:prepare && pnpm build",
+    "beforeBuildCommand": "pnpm runtime:prepare && pnpm profile:prepare && pnpm runtime:sea:prepare && pnpm runtime:sea:verify && pnpm build",
     "devUrl": "http://localhost:5173",
     "frontendDist": "../dist"
   },
@@ -25,8 +25,12 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../runtime/dsh/": "runtime/dsh/",
-      "../runtime/profile-template/": "runtime/profile-template/"
+      "../runtime/profile-template/": "runtime/profile-template/",
+      "../LICENSE": "licenses/DeepShell-Agent-LICENSE",
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md",
+      "../THIRD_PARTY_NOTICES.zh.md": "THIRD_PARTY_NOTICES.zh.md",
+      "../runtime/dsh/node_modules/@deepseek-ai/dsh/LICENSE": "licenses/DeepSeek-Harness-LICENSE",
+      "../node_modules/@yao-pkg/pkg/LICENSE": "licenses/yao-pkg-LICENSE"
     }
   }
 }

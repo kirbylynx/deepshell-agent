@@ -2,15 +2,14 @@ import { execFile } from 'node:child_process'
 import { readFile, stat } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { root, sha256 as sha256File } from './lib/runtime.mjs'
+import { readLock, root, sha256 as sha256File } from './lib/runtime.mjs'
 import { verifyReducedFile, verifyReducedTree } from './lib/package-size.mjs'
 import { platformInputDigest } from './lib/source-inputs.mjs'
 import { normalizedTreeManifest } from './lib/tree-manifest.mjs'
-import { validatePackageManifestV5 } from './lib/package-manifest.mjs'
+import { validatePackageManifestV6 } from './lib/package-manifest.mjs'
+import { loadPackageBaseline } from './lib/package-baseline.mjs'
 
 const execFileAsync = promisify(execFile)
-const EXPECTED_V013_COMMIT = 'ca4add9dc52c5053278570abb28e1d21ae5a0239'
-
 async function readJson(path) {
   return JSON.parse(await readFile(path, 'utf8'))
 }
@@ -19,18 +18,20 @@ function inspection(manifest, subject, inspectionMode) {
   const value = manifest.inspections?.find(item => item.subject === subject)
   if (!value) throw new Error(`${manifest.artifactKind} 清单缺少 ${subject} inspection`)
   if (value.inspectionMode !== inspectionMode || !value.size || !Array.isArray(value.resources) || !Array.isArray(value.runtimePlatforms)) {
-    throw new Error(`${subject} inspection 不符合 schema 5 契约`)
+    throw new Error(`${subject} inspection 不符合 schema 6 契约`)
   }
   return value
 }
 
-const baseline = await readJson(resolve(root, 'tests/fixtures/package-size-baselines/v0.1.3.json'))
-const { stdout: liveV013Commit } = await execFileAsync('git', ['rev-parse', 'v0.1.3^{commit}'], { cwd: root })
-if (liveV013Commit.trim() !== EXPECTED_V013_COMMIT) {
-  throw new Error(`v0.1.3 tag commit 不正确：expected ${EXPECTED_V013_COMMIT}, got ${liveV013Commit.trim()}`)
-}
-if (baseline.canonicalSource?.peeledCommit !== EXPECTED_V013_COMMIT) {
-  throw new Error('v0.1.3 baseline peeled commit 不正确')
+const runtimeLock = await readLock()
+const baseline = await loadPackageBaseline(root, runtimeLock.packageBaselineVersion)
+const { stdout: liveBaselineCommit } = await execFileAsync(
+  'git',
+  ['rev-parse', `refs/tags/${baseline.canonicalSource.tag}^{commit}`],
+  { cwd: root },
+)
+if (liveBaselineCommit.trim() !== baseline.canonicalSource.peeledCommit) {
+  throw new Error(`${baseline.canonicalSource.tag} tag commit 与 tracked baseline 不一致`)
 }
 
 if (process.platform === 'darwin') {
@@ -38,12 +39,12 @@ if (process.platform === 'darwin') {
     readJson(resolve(root, 'runtime/staging/package-release-darwin-arm64-macos-app.json')),
     readJson(resolve(root, 'runtime/staging/package-release-darwin-arm64-macos-dmg.json')),
   ])
-  validatePackageManifestV5(appManifest)
-  validatePackageManifestV5(dmgManifest)
+  validatePackageManifestV6(appManifest)
+  validatePackageManifestV6(dmgManifest)
   const currentSourceInput = await platformInputDigest(root, 'darwin-arm64')
   for (const manifest of [appManifest, dmgManifest]) {
-    if (manifest.schemaVersion !== 5 || manifest.platform !== 'darwin-arm64') {
-      throw new Error('macOS size gate 要求当前平台的 schemaVersion 5 manifest')
+    if (manifest.schemaVersion !== 6 || manifest.platform !== 'darwin-arm64') {
+      throw new Error('macOS size gate 要求当前平台的 schemaVersion 6 manifest')
     }
     if (manifest.macosSourceInputSha256 !== currentSourceInput) {
       throw new Error(`${manifest.artifactKind} manifest 已与当前 macOS 构建输入不同，必须重建`)
@@ -79,7 +80,7 @@ if (process.platform === 'darwin') {
       dmgManifest.baseline?.canonicalSourceCommit !== baseline.canonicalSource.peeledCommit) {
     throw new Error('manifest baseline 来源与 tracked fixture 不一致')
   }
-  const foreignRuntime = appManifest.resources.some(record => record.path.startsWith('runtime/node/win32-x64/'))
+  const foreignRuntime = appManifest.resources.some(record => record.path.startsWith('runtime/sea/win32-x64/'))
   if (foreignRuntime) throw new Error('macOS 产物包含 win32-x64 Runtime')
   const result = {
     ok: true,
@@ -94,13 +95,13 @@ if (process.platform === 'darwin') {
     readJson(resolve(root, 'runtime/staging/package-release-win32-x64-nsis-installer.json')),
     readJson(resolve(root, 'runtime/staging/package-release-win32-x64-windows-portable.json')),
   ])
-  validatePackageManifestV5(installedTreeManifest)
-  validatePackageManifestV5(nsisManifest)
-  validatePackageManifestV5(portableManifest)
+  validatePackageManifestV6(installedTreeManifest)
+  validatePackageManifestV6(nsisManifest)
+  validatePackageManifestV6(portableManifest)
   const currentSourceInput = await platformInputDigest(root, 'win32-x64')
   for (const manifest of [installedTreeManifest, nsisManifest, portableManifest]) {
     if (manifest.platform !== 'win32-x64') {
-      throw new Error('Windows size gate 要求当前平台的 schemaVersion 5 manifest')
+      throw new Error('Windows size gate 要求当前平台的 schemaVersion 6 manifest')
     }
     if (manifest.windowsSourceInputSha256 !== currentSourceInput) {
       throw new Error(`${manifest.artifactKind} manifest 已与当前 Windows 构建输入不同，必须重建`)
@@ -115,8 +116,7 @@ if (process.platform === 'darwin') {
     throw new Error('Windows size gate 收到了错误的 artifactKind')
   }
   const installedTree = inspection(installedTreeManifest, 'windows-installed-tree', 'exact-installed-tree')
-  inspection(installedTreeManifest, 'runtime-node', 'exact-artifact-tree')
-  inspection(installedTreeManifest, 'runtime-dsh', 'exact-artifact-tree')
+  inspection(installedTreeManifest, 'runtime-sea', 'exact-artifact-tree')
   inspection(installedTreeManifest, 'profile-template', 'exact-artifact-tree')
   const nsis = inspection(nsisManifest, 'nsis-installer', 'file-metadata-only')
   // portable 为首版：只校验结构与 staging/extracted 一致性，不与 v0.1.3 比较（REQ-1408）。
@@ -141,7 +141,7 @@ if (process.platform === 'darwin') {
     }
   }
 
-  const platformMatch = path => path.match(/(^|\/)runtime\/node\/([^/]+)(\/|$)/)
+  const platformMatch = path => path.match(/(^|\/)runtime\/sea\/([^/]+)(\/|$)/)
   const foreignRuntimePaths = new Set()
   for (const manifest of [installedTreeManifest, nsisManifest, portableManifest]) {
     for (const inspectionEntry of manifest.inspections) {

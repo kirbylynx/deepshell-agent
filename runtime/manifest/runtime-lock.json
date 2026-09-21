@@ -1,7 +1,8 @@
 {
   "$schema": "./runtime-lock.schema.json",
   "schemaVersion": 1,
-  "applicationVersion": "0.1.4",
+  "applicationVersion": "0.1.5",
+  "packageBaselineVersion": "0.1.4",
   "platforms": ["darwin-arm64", "win32-x64"],
   "node": {
     "version": "24.20.0",
@@ -22,12 +23,41 @@
   },
   "dsh": {
     "package": "@deepseek-ai/dsh",
-    "version": "0.1.5-rc.1",
-    "integrity": "sha512-rmNmzQCg3oIc1z8xH7izRSOuy1TNzq+/NILyfM+7e8DKOyV+yBtg47WEsqR2SiIe1ATec3L/rUa1YhIcfQ2XEg==",
-    "shasum": "6bcdb554bf2eef837666e37f5bd5fa494eb053e4",
+    "version": "0.1.5-rc.2",
+    "integrity": "sha512-8Xc8hCQHcIWRmTCVU/xZdp6/qMsWMeAd2ObChKDEsfhUPJFXx6H0lgeb1DxUMD86HZrrVN+1bCvn1ppjZ/fOxw==",
+    "shasum": "2c78db39568d910868f1e4f34062a4f346d4815d",
     "entry": "node_modules/@deepseek-ai/dsh/lib/bin.js",
     "profile": "web",
-    "desktopBundle": "@deepshell-agent/dsh-desktop"
+    "desktopBundle": "@deepshell-agent/dsh-desktop",
+    "patches": [
+      {
+        "package": "@deepseek-ai/dsh-client-modules",
+        "version": "0.1.5-rc.2",
+        "path": "patches/@deepseek-ai__dsh-client-modules@0.1.5-rc.2.patch",
+        "sha256": "218efdf63541195b7c94e4fd84fe9e0d02d847ec924d4674d5678da905a04f4b",
+        "upstream": "https://github.com/deepseek-ai/deepseek-harness/discussions/5628"
+      }
+    ]
+  },
+  "sea": {
+    "packager": {
+      "package": "@yao-pkg/pkg",
+      "version": "6.22.0",
+      "integrity": "sha512-u+ZgwLsvEFB+Q1rA+IGymgxnm+anl1qGJWsTH6hDHyy2cCiOvMteDNK7NgqFYxN/zdithtORIlCsYSyhAXAgQA==",
+      "shasum": "5c7cfe5c1033ccd473c07e24c61ad2f8c75216ab",
+      "patch": {
+        "path": "patches/@yao-pkg__pkg@6.22.0.patch",
+        "sha256": "feaa0f29693f9c7b9ce3e8b430412f5c597149c96c8149c27b09be64eb5db78c"
+      }
+    },
+    "mode": "enhanced",
+    "compression": "Zstd",
+    "useSnapshot": false,
+    "transforms": ["node-pty-spawn-helper-v1"],
+    "targets": {
+      "darwin-arm64": "node24.20.0-macos-arm64",
+      "win32-x64": "node24.20.0-win-x64"
+    }
   },
   "tooling": {
     "pnpm": "10.30.2",

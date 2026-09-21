@@ -3,6 +3,7 @@ use crate::{
     error::{AppError, ErrorCode},
     logging,
     paths::AppPaths,
+    runtime_cache::{self, NativeCacheLease},
     webview::WebviewPolicy,
 };
 use serde::Serialize;
@@ -59,6 +60,7 @@ impl RuntimeSnapshot {
 
 struct ActiveRuntime {
     child: Child,
+    cache_lease: Option<NativeCacheLease>,
     instance_id: String,
     ready_since: Instant,
     registry_refreshed_at: Instant,
@@ -156,10 +158,13 @@ impl Supervisor {
         self.paths.prepare()?;
         process_tree::recover_registered(
             &self.paths.ownership_file,
-            &self.paths.node,
+            self.paths.runtime_launch.executable(),
             Instant::now() + Duration::from_secs(5),
             Some(&self.shutdown_intent),
         )?;
+        // 旧 Sidecar 可能仍持有同一 SEA generation lock。必须先按 ownership record
+        // 完成恢复，再取得 Cache lease，否则会在恢复逻辑之前形成无界等待。
+        let mut cache_lease = runtime_cache::acquire(&self.paths)?;
         if self.shutdown_intent.load(Ordering::SeqCst) {
             return Err(AppError::new(
                 ErrorCode::RuntimeStopFailed,
@@ -174,14 +179,18 @@ impl Supervisor {
             None,
             Some(&instance_id),
         );
-        let mut child = command::build(&self.paths, &instance_id)?
-            .spawn()
-            .map_err(|error| {
-                AppError::new(
-                    ErrorCode::RuntimeStartFailed,
-                    format!("无法启动 DSH：{error}"),
-                )
-            })?;
+        let mut child = command::build(
+            &self.paths,
+            &instance_id,
+            cache_lease.as_ref().map(NativeCacheLease::pkg_native),
+        )?
+        .spawn()
+        .map_err(|error| {
+            AppError::new(
+                ErrorCode::RuntimeStartFailed,
+                format!("无法启动 DSH：{error}"),
+            )
+        })?;
         let pid = child.id();
         // sidecar 的 stderr 此前被**整段丢弃**，导致启动失败时现场没有任何线索
         // （本机 Windows 验收实测：日志只剩 `runtime_start_failed` 一个代号）。
@@ -190,7 +199,7 @@ impl Supervisor {
         if let Err(registration_error) = process_tree::register(
             &self.paths.ownership_file,
             pid,
-            &self.paths.node,
+            self.paths.runtime_launch.executable(),
             &instance_id,
         ) {
             let deadline = self.effective_cleanup_deadline();
@@ -198,7 +207,7 @@ impl Supervisor {
                 &self.paths.ownership_file,
                 &mut child,
                 pid,
-                &self.paths.node,
+                self.paths.runtime_launch.executable(),
                 &instance_id,
                 deadline,
             ) {
@@ -211,7 +220,24 @@ impl Supervisor {
                 )),
             };
         }
-        let result = self.complete_start(app, &mut child, &instance_id, pid);
+        let result = self
+            .complete_start(app, &mut child, &instance_id, pid)
+            .and_then(|snapshot| {
+                if let Some(lease) = cache_lease.as_mut() {
+                    let cleanup_failures = lease.record_success()?;
+                    if cleanup_failures > 0 {
+                        let _ = logging::record_detailed(
+                            &self.paths.logs,
+                            "warn",
+                            "runtime_cache_cleanup_failed",
+                            None,
+                            Some(&instance_id),
+                            Some(&format!("failures={cleanup_failures}")),
+                        );
+                    }
+                }
+                Ok(snapshot)
+            });
         match result {
             Ok(snapshot) => {
                 *self
@@ -219,6 +245,7 @@ impl Supervisor {
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(ActiveRuntime {
                     child,
+                    cache_lease,
                     instance_id: instance_id.clone(),
                     ready_since: Instant::now(),
                     registry_refreshed_at: Instant::now(),
@@ -250,7 +277,10 @@ impl Supervisor {
                 let deadline = self.effective_cleanup_deadline();
                 let cleanup_result = process_tree::begin_cleanup(&self.paths.ownership_file)
                     .or_else(|_| {
-                        process_tree::retry_cleanup(&self.paths.ownership_file, &self.paths.node)
+                        process_tree::retry_cleanup(
+                            &self.paths.ownership_file,
+                            self.paths.runtime_launch.executable(),
+                        )
                     })
                     .and_then(|_| {
                         process_tree::terminate_registered(
@@ -463,7 +493,10 @@ impl Supervisor {
             let prepared = process_tree::refresh_registered(&self.paths.ownership_file)
                 .and_then(|_| process_tree::begin_cleanup(&self.paths.ownership_file))
                 .or_else(|_| {
-                    process_tree::retry_cleanup(&self.paths.ownership_file, &self.paths.node)
+                    process_tree::retry_cleanup(
+                        &self.paths.ownership_file,
+                        self.paths.runtime_launch.executable(),
+                    )
                 });
             if let Err(error) = prepared {
                 let _ = process_tree::quarantine_registered(&self.paths.ownership_file);
@@ -482,6 +515,31 @@ impl Supervisor {
                 let _ = process_tree::quarantine_registered(&self.paths.ownership_file);
                 return Err(error);
             }
+            if let Some(lease) = runtime.cache_lease.as_mut() {
+                match lease.record_success() {
+                    Ok(cleanup_failures) if cleanup_failures > 0 => {
+                        let _ = logging::record_detailed(
+                            &self.paths.logs,
+                            "warn",
+                            "runtime_cache_cleanup_failed",
+                            None,
+                            Some(&runtime.instance_id),
+                            Some(&format!("failures={cleanup_failures}")),
+                        );
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        let _ = logging::record_detailed(
+                            &self.paths.logs,
+                            "warn",
+                            "runtime_cache_snapshot_failed",
+                            Some(error.code()),
+                            Some(&runtime.instance_id),
+                            Some(error.diagnostic_message()),
+                        );
+                    }
+                }
+            }
             let _ = logging::record_with_instance(
                 &self.paths.logs,
                 "info",
@@ -493,7 +551,7 @@ impl Supervisor {
         } else {
             process_tree::recover_registered(
                 &self.paths.ownership_file,
-                &self.paths.node,
+                self.paths.runtime_launch.executable(),
                 deadline,
                 None,
             )?;
@@ -569,9 +627,10 @@ impl Supervisor {
             None,
             Some(&crashed.instance_id),
         );
+        drop(crashed);
         process_tree::recover_registered(
             &self.paths.ownership_file,
-            &self.paths.node,
+            self.paths.runtime_launch.executable(),
             Instant::now() + Duration::from_secs(5),
             Some(&self.shutdown_intent),
         )?;

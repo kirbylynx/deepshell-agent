@@ -202,8 +202,8 @@ The following sections are for contributors who build, develop, and validate Dee
 - Desktop Shell: Tauri 2 + Rust
 - Web Bootstrap: Vite + TypeScript
 - UI Runtime: official DSH React Web UI
-- Agent Runtime: DeepSeek Harness `0.1.5-rc.1`
-- Bundled Node.js: Node.js `24.20.0`
+- Agent Runtime: DeepSeek Harness `0.1.5-rc.2`
+- Embedded Node.js: Node.js `24.20.0` (Release SEA); the Standard Node runtime remains a development/verification input
 - Package Manager: pnpm `10.30.2`
 - Test: Rust test, Vitest, WebdriverIO/Tauri E2E
 
@@ -212,10 +212,10 @@ The following sections are for contributors who build, develop, and validate Dee
 The build flow has three stages:
 
 1. Install development dependencies.
-2. Prepare the bundled runtime and DSH Profile.
+2. Prepare the locked Standard runtime input, DSH Profile, and platform SEA Runtime.
 3. Build the platform-specific application package on the target operating system.
 
-The public source repository does not commit the full runtime, installed dependency tree, or local build artifacts. On first build, scripts download and verify the Node.js runtime from `runtime/manifest/runtime-lock.json`, then install the locked DSH production dependency tree from `runtime/manifest/dsh-install/package-lock.json`.
+The public source repository does not commit the full runtime, installed dependency tree, generated SEA executable, or local build artifacts. On first build, scripts download and verify the Node.js runtime from `runtime/manifest/runtime-lock.json`, install the locked DSH production dependency tree from `runtime/manifest/dsh-install/package-lock.json`, and build the target-platform SEA used by Release packages. End users still do not need a system Node.js installation.
 
 ### macOS arm64 build
 
@@ -322,7 +322,7 @@ pnpm package:mvp
 
 Notes:
 
-- On Windows, `pnpm package:mvp` calls Tauri to build the NSIS installer, emits the release NSIS package manifest (`runtime/staging/package-release-win32-x64-nsis-installer.json`, `schemaVersion: 5`), and runs static security-boundary checks for the Windows release manifest. It does not run the macOS-only E2E/Release artifact comparison on Windows.
+- On Windows, `pnpm package:mvp` calls Tauri to build the NSIS installer, emits the release NSIS package manifest (`runtime/staging/package-release-win32-x64-nsis-installer.json`, `schemaVersion: 6`), and runs static security-boundary checks for the Windows release manifest. It does not run the macOS-only E2E/Release artifact comparison on Windows.
 - The NSIS toolchain is **downloaded automatically by Tauri** into `%LOCALAPPDATA%\tauri\NSIS\`; it needs no separate install and no system `PATH` change. The WebView2 bootstrapper is cached in the same directory.
 - `v0.1.3` ran that Windows installer pipeline end to end on real Windows x64 hardware (compile → makensis → manifest capture → static boundary checks, exit 0); the artifact is 80.41 MB.
 - The current source baseline does not include Windows code signing. Complete signing separately before formal binary distribution.
@@ -334,6 +334,11 @@ Notes:
 pnpm check
 pnpm runtime:smoke
 pnpm runtime:verify --target all
+pnpm runtime:sea:verify
+pnpm runtime:sea:smoke
+pnpm runtime:sea:benchmark
+pnpm runtime:sea:plugin
+pnpm runtime:sea:on-device
 pnpm profile:verify
 pnpm package:e2e
 pnpm package:mvp
@@ -353,6 +358,10 @@ Notes:
 - `pnpm check` runs formatting checks, Clippy, TypeScript, unit tests, contract tests, integration tests, security tests, and profile/runtime validation.
 - `pnpm runtime:smoke` starts the real DSH Web runtime and validates loopback, token exchange, CSP, Ready Gate, and branding plugin boot-graph integration.
 - `pnpm runtime:verify --target all` validates macOS arm64 and Windows x64 runtime lock manifests.
+- `pnpm runtime:sea:verify` verifies the current platform SEA executable, build receipt, inventories, locked patches, and source-input digest.
+- `pnpm runtime:sea:smoke` starts the current platform SEA and validates the real DSH Web Ready Gate; `pnpm runtime:sea:benchmark` records the fixed startup/RSS/native-cache acceptance matrix on supported on-device environments.
+- `pnpm runtime:sea:plugin` validates the official external-Plugin discovery, disable, runtime-error containment, fail-closed load failure, and restart-recovery route without a system Node.js runtime.
+- `pnpm runtime:sea:on-device` records the current SEA generation's verified Native Addon cache and controller-file footprint after a successful on-device boot.
 - `pnpm profile:verify` validates DeepShell Bundle/Profile/Preset relationships against the official DSH baseline.
 - `pnpm package:e2e` builds the E2E-only app package and captures its artifact manifest.
 - `pnpm package:mvp` is platform-aware:

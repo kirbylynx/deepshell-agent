@@ -1,16 +1,18 @@
 use crate::{
     error::{AppError, ErrorCode},
-    paths::AppPaths,
+    paths::{AppPaths, RuntimeLaunch},
 };
 use std::{
     collections::BTreeMap,
     ffi::OsString,
+    path::Path,
     process::{Command, Stdio},
 };
 
 fn controlled_environment(
     paths: &AppPaths,
     instance_id: &str,
+    native_cache_path: Option<&Path>,
 ) -> Result<BTreeMap<OsString, OsString>, AppError> {
     let mut environment = BTreeMap::new();
     for key in [
@@ -30,23 +32,25 @@ fn controlled_environment(
             environment.insert(key.into(), value);
         }
     }
-    let node_directory = paths
-        .node
-        .parent()
-        .ok_or_else(|| AppError::new(ErrorCode::RuntimeUnavailable, "Node 路径缺少父目录"))?;
     let inherited_path = std::env::var_os("PATH")
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| fallback_system_path().into());
-    environment.insert(
-        "PATH".into(),
-        format!(
-            "{}{}{}",
-            node_directory.display(),
-            path_separator(),
-            inherited_path.to_string_lossy()
-        )
-        .into(),
-    );
+    let controlled_path = match &paths.runtime_launch {
+        RuntimeLaunch::Standard { executable, .. } => {
+            let node_directory = executable.parent().ok_or_else(|| {
+                AppError::new(ErrorCode::RuntimeUnavailable, "Node 路径缺少父目录")
+            })?;
+            format!(
+                "{}{}{}",
+                node_directory.display(),
+                path_separator(),
+                inherited_path.to_string_lossy()
+            )
+            .into()
+        }
+        RuntimeLaunch::Sea { .. } => inherited_path,
+    };
+    environment.insert("PATH".into(), controlled_path);
     for (key, value) in [
         ("HOME", paths.process_home.as_os_str()),
         ("DSH_HOME", paths.dsh_home.as_os_str()),
@@ -63,18 +67,40 @@ fn controlled_environment(
     ] {
         environment.insert(key.into(), value.into());
     }
+    match (&paths.runtime_launch, native_cache_path) {
+        (RuntimeLaunch::Sea { .. }, Some(path)) => {
+            environment.insert("PKG_NATIVE_CACHE_PATH".into(), path.as_os_str().to_owned());
+        }
+        (RuntimeLaunch::Sea { .. }, None) => {
+            return Err(AppError::new(
+                ErrorCode::RuntimeUnavailable,
+                "SEA Runtime 缺少受控 Native Cache",
+            ));
+        }
+        (RuntimeLaunch::Standard { .. }, _) => {}
+    }
     Ok(environment)
 }
 
-pub fn build(paths: &AppPaths, instance_id: &str) -> Result<Command, AppError> {
+pub fn build(
+    paths: &AppPaths,
+    instance_id: &str,
+    native_cache_path: Option<&Path>,
+) -> Result<Command, AppError> {
     paths.prepare()?;
-    let mut command = Command::new(&paths.node);
+    let mut command = Command::new(paths.runtime_launch.executable());
+    if let RuntimeLaunch::Standard { dsh_entry, .. } = &paths.runtime_launch {
+        command.arg(dsh_entry);
+    }
     command
-        .arg(&paths.dsh_entry)
         .args(["web", "--no-open", "--host", "127.0.0.1", "--port", "0"])
         .current_dir(&paths.workspace)
         .env_clear()
-        .envs(controlled_environment(paths, instance_id)?)
+        .envs(controlled_environment(
+            paths,
+            instance_id,
+            native_cache_path,
+        )?)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -143,7 +169,7 @@ mod tests {
             temporary.path().join("resources"),
         )
         .unwrap();
-        let environment = controlled_environment(&paths, "instance-1").unwrap();
+        let environment = controlled_environment(&paths, "instance-1", None).unwrap();
         assert_eq!(
             environment.get(&OsString::from("DSH_PERMISSION_MODE")),
             Some(&OsString::from("workspace-write"))
@@ -154,5 +180,17 @@ mod tests {
         );
         assert!(!environment.contains_key(&OsString::from("DEEPSEEK_API_KEY")));
         assert!(!environment.contains_key(&OsString::from("DSH_TOOLS_MODE")));
+        for forbidden in [
+            "CHDIR",
+            "PKG_EXECPATH",
+            "DEBUG_PKG",
+            "DEBUG_PKG_PERF",
+            "SIZE_LIMIT_PKG",
+            "FOLDER_LIMIT_PKG",
+            "NODE_OPTIONS",
+            "NODE_PATH",
+        ] {
+            assert!(!environment.contains_key(&OsString::from(forbidden)));
+        }
     }
 }

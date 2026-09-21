@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schemaVersion", "runtimeFormat", "applicationVersion", "platform", "provisional", "artifactSourceCommit", "sourceInputSha256", "dsh", "node", "packager", "packagerOutput", "inventories", "excludedForeignArtifacts", "compatibilityTransforms"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "runtimeFormat": { "const": "enhanced-sea" },
+    "applicationVersion": { "const": "0.1.5" },
+    "platform": { "enum": ["darwin-arm64", "win32-x64"] },
+    "provisional": { "type": "boolean" },
+    "artifactSourceCommit": { "pattern": "^[a-f0-9]{40}$" },
+    "sourceInputSha256": { "pattern": "^[a-f0-9]{64}$" },
+    "dsh": {
+      "type": "object",
+      "required": ["package", "version", "integrity", "patches"],
+      "properties": {
+        "package": { "const": "@deepseek-ai/dsh" },
+        "version": { "const": "0.1.5-rc.2" },
+        "integrity": { "pattern": "^sha512-" },
+        "patches": {
+          "type": "array",
+          "prefixItems": [{ "$ref": "#/$defs/dshPatch" }],
+          "items": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "packager": {
+      "type": "object",
+      "required": ["package", "version", "integrity", "patch", "mode", "compression", "useSnapshot"],
+      "properties": {
+        "package": { "const": "@yao-pkg/pkg" },
+        "version": { "const": "6.22.0" },
+        "integrity": { "pattern": "^sha512-" },
+        "patch": {
+          "type": "object",
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": { "const": "patches/@yao-pkg__pkg@6.22.0.patch" },
+            "sha256": { "pattern": "^[a-f0-9]{64}$" }
+          },
+          "additionalProperties": false
+        },
+        "mode": { "const": "enhanced" },
+        "compression": { "const": "Zstd" },
+        "useSnapshot": { "const": false }
+      },
+      "additionalProperties": false
+    },
+    "excludedForeignArtifacts": {
+      "type": "array",
+      "items": { "type": "string" },
+      "uniqueItems": true
+    },
+    "compatibilityTransforms": {
+      "type": "array",
+      "prefixItems": [{ "const": "node-pty-spawn-helper-v1" }],
+      "items": false
+    }
+  },
+  "$defs": {
+    "dshPatch": {
+      "type": "object",
+      "required": ["package", "version", "path", "sha256", "upstream"],
+      "properties": {
+        "package": { "const": "@deepseek-ai/dsh-client-modules" },
+        "version": { "const": "0.1.5-rc.2" },
+        "path": { "const": "patches/@deepseek-ai__dsh-client-modules@0.1.5-rc.2.patch" },
+        "sha256": { "pattern": "^[a-f0-9]{64}$" },
+        "upstream": { "const": "https://github.com/deepseek-ai/deepseek-harness/discussions/5628" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": true
+}

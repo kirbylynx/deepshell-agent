@@ -24,10 +24,14 @@ function combinedPackageReport(version: string, shas: {
   dmg: string
   installer: string
   portable: string
-}, options: { omitInstalledTree?: boolean, portableShaOverride?: string } = {}) {
+}, options: { omitInstalledTree?: boolean, portableShaOverride?: string, provisional?: boolean } = {}) {
+  const runtime = { provisional: options.provisional ?? false }
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     application: { name: 'DeepShell Agent', version },
+    runtime,
+    runtimeAcceptance: { status: 'present', passed: true },
+    firstRunFootprint: { status: 'present', total: { files: 100, bytes: 1_000, allocatedBytes: 2_000 } },
     assets: {
       app: { status: 'present' },
       dmg: { status: 'present', sha256: shas.dmg },
@@ -39,9 +43,11 @@ function combinedPackageReport(version: string, shas: {
       },
     },
     manifests: {
-      releaseWindowsNsisManifest: { status: 'present' },
-      releaseWindowsInstalledTreeManifest: { status: 'present' },
-      releasePortableManifest: { status: 'present' },
+      releasePackageManifest: { status: 'present', runtime },
+      releaseDmgManifest: { status: 'present', runtime },
+      releaseWindowsNsisManifest: { status: 'present', runtime },
+      releaseWindowsInstalledTreeManifest: { status: 'present', runtime },
+      releasePortableManifest: { status: 'present', runtime },
     },
   }
 }
@@ -100,6 +106,7 @@ describe('v0.1.1 release hardening scripts', () => {
       await runNode([
         'scripts/collect-package-report.mjs',
         '--version', '0.1.4',
+        '--baseline-version', '0.1.3',
         '--output-dir', output,
         '--app', app,
         '--dmg', dmg,
@@ -165,6 +172,7 @@ describe('v0.1.1 release hardening scripts', () => {
       await runNode([
         'scripts/collect-package-report.mjs',
         '--version', version,
+        '--baseline-version', '0.1.3',
         '--app', app,
         '--dmg', dmg,
         '--runtime-node', node,
@@ -693,6 +701,46 @@ describe('v0.1.1 release hardening scripts', () => {
     }
   })
 
+  it('combined release staging 拒绝 provisional Runtime', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-provisional-'))
+    try {
+      const version = '0.1.4'
+      const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
+      const installer = resolve(temporary, 'DeepShell Agent_0.1.4_x64-setup.exe')
+      const portable = resolve(temporary, 'DeepShell.Agent_0.1.4_x64-portable.zip')
+      const support = resolve(temporary, 'support.json')
+      const report = resolve(temporary, 'package-report.json')
+      await writeFile(dmg, 'dmg')
+      await writeFile(installer, 'installer')
+      await writeFile(portable, 'portable')
+      await writeFile(support, `{"application":{"version":"${version}"}}\n`)
+      await writeFile(report, JSON.stringify({
+        ...combinedPackageReport(version, {
+          dmg: sha256Text('dmg'),
+          installer: sha256Text('installer'),
+          portable: sha256Text('portable'),
+        }, { provisional: true }),
+        application: { name: 'DeepShell Agent', version },
+      }))
+
+      await expect(runNode([
+        'scripts/release-staging.mjs',
+        '--version', version,
+        '--output-dir', resolve(temporary, 'release'),
+        '--dmg', dmg,
+        '--windows-installer', installer,
+        '--windows-portable', portable,
+        '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
+        '--license-inventory', support,
+        '--sbom', support,
+        '--package-report', report,
+        '--security-audit', support,
+      ])).rejects.toThrow(/provisional Runtime/)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
   it('release staging 自动发现时拒绝 old-only、错误产品名和错误架构资产', async () => {
     const cases = [
       ['old-only', 'DeepShell Agent_0.1.3_x64-setup.exe'],
@@ -927,6 +975,23 @@ describe('v0.1.1 release hardening scripts', () => {
     expect(assertBaselineAppInfoPlist(valid)).toEqual({ version: '0.1.3', executable: 'DeepShell Agent' })
     expect(() => assertBaselineAppInfoPlist(valid.replace('0.1.3', '0.1.4'))).toThrow(/Info\.plist 版本不一致/)
     expect(() => assertBaselineAppInfoPlist(valid.replace('<key>CFBundleExecutable</key><string>DeepShell Agent</string>', ''))).toThrow(/CFBundleExecutable/)
+  })
+
+  it('按 runtime lock 的显式版本加载 package baseline，并保留历史字段兼容', async () => {
+    const { loadPackageBaseline, packageBaselineArtifact, packageBaselineSourceTree } =
+      await import('../../scripts/lib/package-baseline.mjs')
+    const baseline = await loadPackageBaseline(root, '0.1.4')
+    expect(baseline.canonicalSource.tag).toBe('v0.1.4')
+    expect(packageBaselineArtifact(baseline, 'macos-dmg').sha256).toBe(
+      '4f4169013478e62aac1c67bc72d8f2605022d088924ffe0f9362f9d7a47607ef'
+    )
+    expect(packageBaselineSourceTree(baseline, 'darwin-arm64', 'runtime-dsh').contentSha256).toBe(
+      '840cfb39ea1ebc424c40facc917a52539fd6672ba2140c0727b54fad8568ead3'
+    )
+    expect(packageBaselineSourceTree(baseline, 'win32-x64', 'runtime-dsh').contentSha256).toBe(
+      'f1f65e21e0f6e0bc0e08301c8f77848d35e0b09abf7538ba151982dcc8d9f8bf'
+    )
+    await expect(loadPackageBaseline(root, '0.1.9')).rejects.toThrow(/ENOENT/)
   })
 
   it('从 license inventory 派生 SBOM baseline', async () => {

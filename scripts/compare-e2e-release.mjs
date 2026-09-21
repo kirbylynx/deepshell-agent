@@ -59,8 +59,8 @@ if (e2e && release) {
   if (e2e.platform !== release.platform) {
     throw new Error(`E2E/Release 产物清单来自不同平台，拒绝比较：${e2e.platform} vs ${release.platform}`)
   }
-  if (e2e.schemaVersion !== 5 || release.schemaVersion !== 5) {
-    throw new Error('E2E/Release 产物清单必须使用 schemaVersion 5')
+  if (e2e.schemaVersion !== 6 || release.schemaVersion !== 6) {
+    throw new Error('E2E/Release 产物清单必须使用 schemaVersion 6')
   }
   if (e2e.artifactKind !== 'macos-app' || release.artifactKind !== 'macos-app') {
     throw new Error(`E2E/Release 安全边界只能比较同平台应用 tree：${e2e.artifactKind} vs ${release.artifactKind}`)
@@ -122,7 +122,7 @@ if (e2e && release) {
     'configSha256', 'capabilitySha256', 'profileManifestSha256',
     ...(darwin ? ['infoPlistSha256'] : []),
     'cargoTomlSha256', 'cargoLockSha256', 'cargoMetadataSha256', platformDigestField,
-    'binarySourceInputSha256',
+    'binarySourceInputSha256', 'runtime',
     ...(darwin ? ['signing'] : []),
     'configSources'
   ]

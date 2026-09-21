@@ -6,10 +6,11 @@
 // ZIP 内只有一个顶层 `DeepShell Agent/` 目录：
 //   DeepShell Agent/
 //   ├── DeepShell Agent.exe
-//   ├── runtime/node/win32-x64/
-//   ├── runtime/dsh/
+//   ├── runtime/sea/win32-x64/
 //   ├── runtime/profile-template/
 //   ├── LICENSE
+//   ├── THIRD_PARTY_NOTICES.md
+//   ├── licenses/
 //   └── README-portable.txt
 //
 // 安全约束（不得放宽）：
@@ -47,14 +48,22 @@ export function portablePaths(packageRoot, version) {
 
 export const portableAllowlist = [
   { target: 'DeepShell Agent.exe', source: 'src-tauri/target/release/deepshell-agent.exe', kind: 'file' },
-  { target: 'runtime/node/win32-x64', source: 'runtime/node/win32-x64', kind: 'directory' },
-  { target: 'runtime/dsh', source: 'runtime/dsh', kind: 'directory' },
+  { target: 'runtime/sea/win32-x64', source: 'runtime/sea/win32-x64', kind: 'directory' },
   { target: 'runtime/profile-template', source: 'runtime/profile-template', kind: 'directory' },
   { target: 'LICENSE', source: 'LICENSE', kind: 'file' },
+  { target: 'THIRD_PARTY_NOTICES.md', source: 'THIRD_PARTY_NOTICES.md', kind: 'file' },
+  { target: 'THIRD_PARTY_NOTICES.zh.md', source: 'THIRD_PARTY_NOTICES.zh.md', kind: 'file' },
+  { target: 'licenses/DeepShell-Agent-LICENSE', source: 'LICENSE', kind: 'file' },
+  { target: 'licenses/DeepSeek-Harness-LICENSE', source: 'runtime/dsh/node_modules/@deepseek-ai/dsh/LICENSE', kind: 'file' },
+  { target: 'licenses/Node.js-LICENSE', source: 'runtime/node/win32-x64/LICENSE', kind: 'file' },
+  { target: 'licenses/yao-pkg-LICENSE', source: 'node_modules/@yao-pkg/pkg/LICENSE', kind: 'file' },
   { target: 'README-portable.txt', source: 'packaging/windows/README-portable.txt', kind: 'file' }
 ]
 
-export const portableTopLevelEntries = ['DeepShell Agent.exe', 'runtime', 'LICENSE', 'README-portable.txt']
+export const portableTopLevelEntries = [
+  'DeepShell Agent.exe', 'runtime', 'licenses', 'LICENSE',
+  'THIRD_PARTY_NOTICES.md', 'THIRD_PARTY_NOTICES.zh.md', 'README-portable.txt',
+]
 
 // 顶层条目断言（供单测直接调用）：必须恰好等于 allowlist 目标集合，不允许额外或缺失条目。
 export function assertPortableLayout(entries, label = 'portable tree') {
@@ -186,8 +195,8 @@ export async function createWindowsPortable() {
   // 复制前先证明源侧必需项存在，避免产出"压缩成功但内容不全"的 ZIP。
   for (const source of [
     resolve(root, 'src-tauri/target/release/deepshell-agent.exe'),
-    resolve(root, 'runtime/node/win32-x64/node.exe'),
-    resolve(root, 'runtime/dsh', lock.dsh.entry),
+    resolve(root, 'runtime/sea/win32-x64/deepshell-runtime.exe'),
+    resolve(root, 'runtime/sea/win32-x64/sea-runtime-manifest.json'),
     resolve(root, 'runtime/profile-template/template-manifest.json')
   ]) {
     await access(source)

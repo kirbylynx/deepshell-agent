@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 2,
+  "baselineVersion": "0.1.4",
+  "canonicalSource": {
+    "tag": "v0.1.4",
+    "peeledCommit": "4a54138e0368fdd2cbd92cacf2f963365d220850",
+    "baselineSourceInputSha256": "83d29f18d03c4629a287b0335e265f3313b2b43b38fc021551c370c4ed478b00",
+    "platformSourceInputSha256": {
+      "darwin-arm64": "e522712c0b5fb0bfba4da1087ac3ccb416d678194d3234243c5682f46536fb7b",
+      "win32-x64": "06bfdfafe29a1b9afbe611bbb321a8bcddb8dc4e5814add63bab1906c5e14a64"
+    }
+  },
+  "measurement": {
+    "algorithm": "deepshell-tree-v1",
+    "symlinks": "dereference-safe-files-within-trusted-subtree",
+    "nonDirectoryEntries": "regular-files-and-safe-dereferenced-symlinks",
+    "emptyDirectories": "ignored",
+    "logicalBytes": "sum-of-file-lengths",
+    "allocatedBytes": "not-recorded-by-v0.1.4; required separately for v0.1.5 acceptance",
+    "runtimeOwnedFirstRun": "not-recorded-by-v0.1.4; v0.1.5 records first-run delta and total separately",
+    "baselineInput": "git-blobs-v1",
+    "tooling": {
+      "node": "24.20.0",
+      "pnpm": "10.30.2"
+    }
+  },
+  "provenance": {
+    "checkoutPolicy": "exact peeled v0.1.4 release commit; final accepted release assets and reports",
+    "releaseRecord": "docs/releases/v0.1.4.md",
+    "packageReport": {
+      "asset": "deepshell-agent-v0.1.4-package-report.json",
+      "sha256": "a381bab652047fb996cb74c353e0823d5e874a12f0d99e18cc053611563b2be7"
+    },
+    "windowsAcceptance": "accepted-on-device"
+  },
+  "artifacts": {
+    "macosApp": {
+      "status": "canonical",
+      "bytes": 438102894,
+      "files": 30220,
+      "contentSha256": "3c6ea59584cc219077e76e54870ef833c8f2307b035547e6b66071376eb58c84"
+    },
+    "macosDmg": {
+      "status": "canonical",
+      "bytes": 247455775,
+      "files": 1,
+      "sha256": "4f4169013478e62aac1c67bc72d8f2605022d088924ffe0f9362f9d7a47607ef"
+    },
+    "windowsInstalledTree": {
+      "status": "canonical",
+      "bytes": 340319800,
+      "files": 27426,
+      "contentSha256": "de2ed8938816f2583c2e8bb9502ab59d8dd5f1bdac352f210f57b9413567b3c2"
+    },
+    "windowsNsis": {
+      "status": "canonical",
+      "bytes": 56777588,
+      "files": 1,
+      "sha256": "4038eda58868196dc14d0d2b4aa8940397ea8954ac6d6391420621e967b0b8da"
+    },
+    "windowsPortable": {
+      "status": "canonical",
+      "staging": {
+        "bytes": 340008126,
+        "files": 27427,
+        "contentSha256": "ea5cb940db88a8594844c3c40b1e111b214bf73523dac94b22fb37820b9d6887"
+      },
+      "archive": {
+        "bytes": 111700110,
+        "files": 1,
+        "sha256": "6725f6ea5d3a28a9675b059c9f3a590e8b4c09422262aeb0efc102165851c512"
+      }
+    }
+  },
+  "sourceTrees": {
+    "darwinNode": {
+      "status": "canonical",
+      "bytes": 196611786,
+      "files": 4800,
+      "contentSha256": "6c011ae1d03bfb9ca5ec16b8ffbd59faae78dcc9e1b290c3f39dc60c19e29482"
+    },
+    "windowsNode": {
+      "status": "canonical",
+      "bytes": 106774079,
+      "files": 1994,
+      "contentSha256": "ab137e9fcd338e6dae838cf81d79f14f2ca8832c0c0a7f3e820170e5b8c937b8"
+    },
+    "darwinDsh": {
+      "status": "canonical",
+      "bytes": 220981087,
+      "files": 25399,
+      "contentSha256": "840cfb39ea1ebc424c40facc917a52539fd6672ba2140c0727b54fad8568ead3"
+    },
+    "windowsDsh": {
+      "status": "canonical",
+      "bytes": 223864490,
+      "files": 25412,
+      "contentSha256": "f1f65e21e0f6e0bc0e08301c8f77848d35e0b09abf7538ba151982dcc8d9f8bf"
+    },
+    "darwinProfileTemplate": {
+      "status": "canonical",
+      "bytes": 67274,
+      "files": 17,
+      "contentSha256": "b97dc8ce7b5396dd545ff65d6f80b1b04743140f8acca6198b2a6a293b21a424"
+    },
+    "windowsProfileTemplate": {
+      "status": "canonical",
+      "bytes": 67846,
+      "files": 18,
+      "contentSha256": "04a660d80fcc15e7ddfb7235d36b690a00d9b71fb63183ab2e0184b6249d0387"
+    }
+  }
+}

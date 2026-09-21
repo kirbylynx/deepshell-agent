@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
 import { packageAdapter } from '../../scripts/lib/package-platform.mjs'
-import { summarizeInspections, validatePackageManifestV5 } from '../../scripts/lib/package-manifest.mjs'
+import { summarizeInspections, validatePackageManifestV5, validatePackageManifestV6 } from '../../scripts/lib/package-manifest.mjs'
 import { platformInputDigest } from '../../scripts/lib/source-inputs.mjs'
 import { normalizedTreeManifest } from '../../scripts/lib/tree-manifest.mjs'
 import { isCombinedWindowsPackageReportInput } from '../../scripts/lib/package-report-mode.mjs'
@@ -28,6 +28,7 @@ import {
   copyTreeWithoutReparsePoints,
   packAndVerify,
   portableAllowlist,
+  portableTopLevelEntries,
   portablePaths,
 } from '../../scripts/create-windows-portable.mjs'
 import { assertSafeInstallRoot } from '../../scripts/package-windows-installed-tree.mjs'
@@ -36,7 +37,11 @@ const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
 const execFileAsync = promisify(execFile)
 
 async function runPackageReport(args: string[]) {
-  return execFileAsync(process.execPath, ['scripts/collect-package-report.mjs', ...args], {
+  return execFileAsync(process.execPath, [
+    'scripts/collect-package-report.mjs',
+    '--baseline-version', '0.1.3',
+    ...args,
+  ], {
     cwd: workspace,
     maxBuffer: 32 * 1024 * 1024,
   })
@@ -309,8 +314,8 @@ async function runWindowsStrictNsisCase(temporary: string, baseline: BaselineFix
   }
 }
 
-describe('v0.1.4 打包契约', () => {
-  it('平台配置合并后保留共享 DSH/Profile 且只加入当前平台 Node', async () => {
+describe('跨版本打包契约', () => {
+  it('平台配置合并后保留共享 Profile 且只加入当前平台 SEA', async () => {
     const base = JSON.parse(await readFile(resolve(workspace, 'src-tauri/tauri.conf.json'), 'utf8'))
     const macos = JSON.parse(await readFile(resolve(workspace, 'src-tauri/tauri.macos.conf.json'), 'utf8'))
     const windows = JSON.parse(await readFile(resolve(workspace, 'src-tauri/tauri.windows.conf.json'), 'utf8'))
@@ -318,24 +323,30 @@ describe('v0.1.4 打包契约', () => {
     const winResources = merge(base, windows).bundle as { resources: Record<string, string> }
 
     expect(Object.keys(macResources.resources)).toEqual(expect.arrayContaining([
-      '../runtime/dsh/', '../runtime/profile-template/', '../runtime/node/darwin-arm64/',
+      '../runtime/profile-template/', '../runtime/sea/darwin-arm64/',
     ]))
-    expect(Object.keys(macResources.resources)).not.toContain('../runtime/node/win32-x64/')
+    expect(Object.keys(macResources.resources)).not.toContain('../runtime/sea/win32-x64/')
+    expect(Object.keys(macResources.resources)).not.toContain('../runtime/node/darwin-arm64/')
+    expect(Object.keys(macResources.resources)).not.toContain('../runtime/dsh/')
     expect(Object.keys(winResources.resources)).toEqual(expect.arrayContaining([
-      '../runtime/dsh/', '../runtime/profile-template/', '../runtime/node/win32-x64/',
+      '../runtime/profile-template/', '../runtime/sea/win32-x64/',
     ]))
-    expect(Object.keys(winResources.resources)).not.toContain('../runtime/node/darwin-arm64/')
+    expect(Object.keys(winResources.resources)).not.toContain('../runtime/sea/darwin-arm64/')
+    expect(Object.keys(winResources.resources)).not.toContain('../runtime/node/win32-x64/')
+    expect(Object.keys(winResources.resources)).not.toContain('../runtime/dsh/')
   })
 
   it('adapter 锁定 macOS forbidden Runtime，并支持 Windows tree/portable 显式路径', () => {
     const lock = { dsh: { entry: 'node_modules/@deepseek-ai/dsh/lib/bin.js' } }
     const mac = packageAdapter('darwin', lock, 'macos-app')
-    expect(mac.requiredArtifacts).toContain('Contents/Resources/runtime/node/darwin-arm64/bin/node')
-    expect(mac.forbiddenArtifacts).toContain('Contents/Resources/runtime/node/win32-x64')
+    expect(mac.requiredArtifacts).toContain('Contents/Resources/runtime/sea/darwin-arm64/deepshell-runtime')
+    expect(mac.forbiddenArtifacts).toContain('Contents/Resources/runtime/node')
+    expect(mac.forbiddenArtifacts).toContain('Contents/Resources/runtime/dsh')
 
     const installed = packageAdapter('win32', lock, 'windows-installed-tree', { artifactPath: '/tmp/installed' })
-    expect(installed.requiredArtifacts).toContain('runtime/node/win32-x64/node.exe')
-    expect(installed.forbiddenArtifacts).toContain('runtime/node/darwin-arm64')
+    expect(installed.requiredArtifacts).toContain('runtime/sea/win32-x64/deepshell-runtime.exe')
+    expect(installed.forbiddenArtifacts).toContain('runtime/node')
+    expect(installed.forbiddenArtifacts).toContain('runtime/dsh')
     const portable = packageAdapter('win32', lock, 'windows-portable', {
       stagingPath: '/tmp/staging', archivePath: '/tmp/archive.zip', extractedPath: '/tmp/extracted',
     })
@@ -363,6 +374,56 @@ describe('v0.1.4 打包契约', () => {
       },
     }
     expect(validatePackageManifestV5(manifest)).toBe(manifest)
+  })
+
+  it('schema 6 强制记录 SEA、锁定补丁和标准 Runtime 禁止路径', () => {
+    const manifest = {
+      schemaVersion: 6,
+      platform: 'darwin-arm64',
+      mode: 'release',
+      applicationVersion: '0.1.5',
+      artifactKind: 'macos-app',
+      macosSourceInputSha256: 'a'.repeat(64),
+      binarySourceInputSha256: 'a'.repeat(64),
+      runtime: {
+        format: 'sea', platform: 'darwin-arm64', provisional: false, sourceInputSha256: 'a'.repeat(64),
+        artifactSourceCommit: 'b'.repeat(40),
+        dsh: { package: '@deepseek-ai/dsh', version: '0.1.5-rc.2', patches: [
+          { package: '@deepseek-ai/dsh-client-modules', version: '0.1.5-rc.2', sha256: 'c'.repeat(64) },
+        ] },
+        node: { version: '24.20.0', target: 'node24.20.0-macos-arm64', archiveSha256: 'd'.repeat(64) },
+        packager: {
+          package: '@yao-pkg/pkg', version: '6.22.0', mode: 'enhanced', compression: 'Zstd',
+          useSnapshot: false, patchSha256: 'e'.repeat(64), configSha256: 'f'.repeat(64),
+        },
+        executable: {
+          path: 'runtime/sea/darwin-arm64/deepshell-runtime', bytes: 100, sha256: '1'.repeat(64), signing: 'signed-adhoc',
+        },
+        nativeInventory: {
+          file: 'native-addons.json', sha256: '2'.repeat(64), files: 8, bytes: 10, contentSha256: '3'.repeat(64),
+        },
+        packagedTree: { files: 6, bytes: 200, contentSha256: '4'.repeat(64) },
+        standardRuntimeForbiddenPaths: ['runtime/node', 'runtime/dsh'],
+      },
+      inspections: [{
+        subject: 'runtime-sea', inspectionMode: 'exact-artifact-tree', status: 'equivalent',
+        resources: [{ path: 'deepshell-runtime', bytes: 100, sha256: '1'.repeat(64) }],
+        runtimePlatforms: ['darwin-arm64'], size: { bytes: 200, files: 6 }, contentSha256: '4'.repeat(64),
+      }],
+      baseline: {
+        status: 'canonical', canonicalSourceRef: 'v0.1.4', canonicalSourceCommit: 'commit',
+        baselineSourceInputSha256: '5'.repeat(64), algorithmVersion: 'v1', treeContentSha256: '6'.repeat(64),
+      },
+    }
+    expect(validatePackageManifestV6(manifest)).toBe(manifest)
+    expect(() => validatePackageManifestV6({
+      ...manifest,
+      runtime: { ...manifest.runtime, provisional: undefined },
+    })).toThrow(/provisional/)
+    expect(() => validatePackageManifestV6({
+      ...manifest,
+      runtime: { ...manifest.runtime, standardRuntimeForbiddenPaths: ['runtime/node'] },
+    })).toThrow(/标准 Runtime/)
   })
 
   it('reference-only baseline 保留非 canonical 状态', () => {
@@ -456,7 +517,7 @@ describe('v0.1.4 打包契约', () => {
   })
 
   it('便携 staging 布局与 allowlist 目标路径约束', () => {
-    const entries = ['DeepShell Agent.exe', 'runtime', 'LICENSE', 'README-portable.txt']
+    const entries = [...portableTopLevelEntries]
     expect(() => assertPortableLayout(entries)).not.toThrow()
     expect(() => assertPortableLayout([...entries, 'extra.txt'])).toThrow('顶层条目不符合便携布局')
     expect(() => assertPortableLayout(['DeepShell Agent.exe', 'runtime', 'LICENSE'])).toThrow('顶层条目不符合便携布局')
@@ -525,6 +586,10 @@ describe('v0.1.4 打包契约', () => {
       await mkdir(resolve(stagingPath, 'runtime'), { recursive: true })
       await writeFile(resolve(stagingPath, 'runtime', 'data.bin'), 'data')
       await writeFile(resolve(stagingPath, 'LICENSE'), 'license')
+      await writeFile(resolve(stagingPath, 'THIRD_PARTY_NOTICES.md'), 'notices')
+      await writeFile(resolve(stagingPath, 'THIRD_PARTY_NOTICES.zh.md'), 'notices zh')
+      await mkdir(resolve(stagingPath, 'licenses'), { recursive: true })
+      await writeFile(resolve(stagingPath, 'licenses', 'DeepShell-Agent-LICENSE'), 'license')
       await writeFile(resolve(stagingPath, 'README-portable.txt'), 'readme')
       const archivePath = resolve(temporary, 'DeepShell.Agent_0.1.4_x64-portable.zip')
       const extractParent = resolve(temporary, 'extracted')

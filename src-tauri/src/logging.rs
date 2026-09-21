@@ -168,7 +168,7 @@ mod tests {
         .unwrap();
         let path = temporary.path().join("app.jsonl");
         let text = fs::read_to_string(&path).unwrap();
-        assert!(text.contains("\"appVersion\":\"0.1.4\""));
+        assert!(text.contains("\"appVersion\":\"0.1.5\""));
         assert!(text.contains("\"errorCode\":\"runtime_start_failed\""));
         // 运行时版本必须与 runtime-lock 一致（防止 Node/DSH 升级后日志谎报版本）。
         let lock: serde_json::Value =

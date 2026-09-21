@@ -15,7 +15,8 @@ This project license does not change the licenses of bundled or linked third-par
 | Component | Locked version | Declared license | License source |
 |---|---:|---|---|
 | Node.js | 24.20.0 | Node.js license plus bundled third-party notices | downloaded during `pnpm runtime:prepare` |
-| DeepSeek Harness CLI (`@deepseek-ai/dsh`) | 0.1.5-rc.1 | MIT | installed from `runtime/manifest/dsh-install/package-lock.json` |
+| DeepSeek Harness CLI (`@deepseek-ai/dsh`) | 0.1.5-rc.2 | MIT | installed from `runtime/manifest/dsh-install/package-lock.json` |
+| `@yao-pkg/pkg` Enhanced SEA packager/bootstrap | 6.22.0 | MIT | locked in `pnpm-lock.yaml`; embedded bootstrap 使用仓库内 patch，其精确 SHA256 锁定在 `runtime/manifest/runtime-lock.json` |
 | React | 18.3.1 | MIT | installed as part of the locked DSH/runtime dependency set |
 | sharp/libvips Darwin arm64 runtime | 1.3.3 | LGPL-3.0-or-later | package metadata and the package's bundled license files |
 

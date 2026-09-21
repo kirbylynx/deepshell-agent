@@ -1,11 +1,14 @@
 import { access, readdir, readFile, stat, writeFile, mkdir } from 'node:fs/promises'
 import { basename, extname, relative, resolve } from 'node:path'
-import { currentRuntimePlatform, root, sha256 as sha256File } from './lib/runtime.mjs'
+import Ajv2020 from 'ajv/dist/2020.js'
+import { currentRuntimePlatform, readLock, root, sha256 as sha256File } from './lib/runtime.mjs'
 import { redactedJson } from './lib/redaction.mjs'
 import { normalizedTreeManifest } from './lib/tree-manifest.mjs'
 import { platformInputDigest } from './lib/source-inputs.mjs'
-import { summarizeInspections, validatePackageManifestV5 } from './lib/package-manifest.mjs'
+import { summarizeInspections, validatePackageManifest } from './lib/package-manifest.mjs'
 import { isCombinedWindowsPackageReportInput } from './lib/package-report-mode.mjs'
+import { loadPackageBaseline, packageBaselineArtifact, packageBaselineSourceTree } from './lib/package-baseline.mjs'
+import { summarizeRuntimeAcceptance } from './lib/runtime-acceptance.mjs'
 import {
   assertArtifactNameMatchesVersion,
   isMacosDmgName,
@@ -37,10 +40,21 @@ async function exists(path) {
 async function directoryMetrics(path) {
   if (!await exists(path)) return { status: 'missing' }
   const manifest = await normalizedTreeManifest(path)
+  let allocatedBytes = 0
+  let allocationAvailable = true
+  for (const entry of manifest.entries) {
+    const metadata = await stat(resolve(path, entry.path), { bigint: true })
+    if (typeof metadata.blocks !== 'bigint') {
+      allocationAvailable = false
+      break
+    }
+    allocatedBytes += Number(metadata.blocks * 512n)
+  }
   return {
     status: 'present',
     bytes: manifest.bytes,
     files: manifest.files,
+    ...(allocationAvailable ? { allocatedBytes } : { allocatedBytesStatus: 'unavailable-on-platform' }),
     contentSha256: manifest.contentSha256,
     algorithm: manifest.algorithm,
   }
@@ -84,8 +98,14 @@ function requireCombinedWindowsArgument(condition, message) {
 }
 
 const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
-const baselineFixture = await optionalJson(resolve(root, 'tests/fixtures/package-size-baselines/v0.1.3.json'))
+const runtimeLock = await readLock()
 const version = argValue('--version', pkg.version)
+const baselineVersionArgument = argValue('--baseline-version', undefined)
+if (version !== runtimeLock.applicationVersion && baselineVersionArgument === undefined) {
+  throw new Error('为非当前应用版本生成 package report 时必须显式传入 --baseline-version')
+}
+const baselineVersion = baselineVersionArgument ?? runtimeLock.packageBaselineVersion
+const baselineFixture = await loadPackageBaseline(root, baselineVersion)
 const allowMissingReleaseManifests = process.argv.includes('--allow-missing-release-manifests')
 const outputDirectory = resolve(argValue('--output-dir', resolve(root, 'runtime/staging')))
 await mkdir(outputDirectory, { recursive: true })
@@ -184,12 +204,7 @@ const sourceInputSha256ByPlatform = {
 const expectedReleaseArtifactKind = runtimePlatform === 'darwin-arm64' ? 'macos-app' : 'nsis-installer'
 
 function baselineForArtifactKind(artifactKind) {
-  return {
-    'macos-app': baselineFixture?.artifacts?.macosApp,
-    'macos-dmg': baselineFixture?.artifacts?.macosDmg,
-    'nsis-installer': baselineFixture?.artifacts?.windowsNsis,
-    'windows-installed-tree': baselineFixture?.artifacts?.windowsInstalledTree,
-  }[artifactKind] ?? null
+  return packageBaselineArtifact(baselineFixture, artifactKind)
 }
 
 function incompatibleManifestSummary(label, manifest, reasons) {
@@ -211,12 +226,13 @@ function sourceDigestFieldForPlatform(platform) {
 function manifestSummary(manifest, label, expectedArtifactKind, required, expectedPlatform = runtimePlatform) {
   if (manifest === null) {
     if (required && !allowMissingReleaseManifests) {
-      throw new Error(`${label} 缺失，release package report 必须基于当前 schema 5 manifest`)
+      throw new Error(`${label} 缺失，release package report 必须基于当前 package manifest`)
     }
     return { status: 'missing' }
   }
-  validatePackageManifestV5(manifest)
+  validatePackageManifest(manifest)
   const reasons = []
+  if (version === runtimeLock.applicationVersion && manifest.schemaVersion !== 6) reasons.push(`schemaVersion=${manifest.schemaVersion}`)
   if (manifest.mode !== 'release') reasons.push(`mode=${manifest.mode}`)
   if (manifest.applicationVersion !== version) reasons.push(`version=${manifest.applicationVersion}`)
   if (manifest.platform !== expectedPlatform) reasons.push(`platform=${manifest.platform}`)
@@ -251,6 +267,7 @@ function manifestSummary(manifest, label, expectedArtifactKind, required, expect
     resourceCount: Array.isArray(manifest.resources) ? manifest.resources.length : 0,
     baseline: manifest.baseline,
     inspections: summarizeInspections(manifest.inspections ?? []),
+    ...(manifest.runtime ? { runtime: manifest.runtime } : {}),
   }
 }
 const releaseManifestSummary = manifestSummary(releaseManifest, 'release package manifest', expectedReleaseArtifactKind, true)
@@ -303,15 +320,14 @@ function inspectionMetric(manifest, subject) {
 
 function baselineArtifactFor(assetKey) {
   if (!baselineFixture?.artifacts && !baselineFixture?.sourceTrees) return null
-  const runtimeNodeKey = runtimePlatform === 'darwin-arm64' ? 'darwinNode' : 'windowsNode'
   return {
     app: baselineFixture.artifacts?.macosApp,
     dmg: baselineFixture.artifacts?.macosDmg,
     windowsInstaller: baselineFixture.artifacts?.windowsNsis,
     windowsInstalledTree: baselineFixture.artifacts?.windowsInstalledTree,
-    runtimeNode: baselineFixture.sourceTrees?.[runtimeNodeKey],
-    runtimeDsh: baselineFixture.sourceTrees?.dsh,
-    profileTemplate: baselineFixture.sourceTrees?.profileTemplate,
+    runtimeNode: packageBaselineSourceTree(baselineFixture, runtimePlatform, 'runtime-node'),
+    runtimeDsh: packageBaselineSourceTree(baselineFixture, runtimePlatform, 'runtime-dsh'),
+    profileTemplate: packageBaselineSourceTree(baselineFixture, runtimePlatform, 'profile-template'),
   }[assetKey] ?? null
 }
 
@@ -329,13 +345,27 @@ function attachBaselineDelta(metric, assetKey) {
   }
 }
 
+function attachMeasuredAllocation(metric, measured, label) {
+  if (!metric || metric.status !== 'present' || measured.status !== 'present') return metric
+  if (metric.bytes !== measured.bytes || metric.files !== measured.files ||
+      metric.contentSha256 !== measured.contentSha256) {
+    throw new Error(`${label} 的 manifest 指标与磁盘树不一致，不能附加 allocated bytes`)
+  }
+  return {
+    ...metric,
+    ...(Number.isSafeInteger(measured.allocatedBytes)
+      ? { allocatedBytes: measured.allocatedBytes }
+      : { allocatedBytesStatus: measured.allocatedBytesStatus ?? 'unavailable-on-platform' }),
+  }
+}
+
 function foreignRuntimePathsFromManifests(manifests) {
   const paths = new Set()
   for (const manifest of manifests.filter(Boolean)) {
     const expected = manifest.platform
     for (const inspection of manifest.inspections ?? []) {
       for (const resource of inspection.resources ?? []) {
-        const match = resource.path.match(/(^|\/)runtime\/node\/([^/]+)(\/|$)/)
+        const match = resource.path.match(/(^|\/)runtime\/(?:node|sea)\/([^/]+)(\/|$)/)
         if (match && match[2] !== expected) paths.add(resource.path)
       }
     }
@@ -354,7 +384,13 @@ const validReleaseWindowsInstalledTreeManifest = presentManifest(
 const fallbackAppMetrics = await directoryMetrics(appPath)
 const fallbackDmgMetrics = await dmgMetric()
 const fallbackWindowsInstallerMetrics = await windowsInstallerMetric()
-const appMetrics = attachBaselineDelta(inspectionMetric(validReleaseManifest, 'macos-app') ?? fallbackAppMetrics, 'app')
+const inspectedAppMetrics = inspectionMetric(validReleaseManifest, 'macos-app')
+const appMetrics = attachBaselineDelta(
+  inspectedAppMetrics === null
+    ? fallbackAppMetrics
+    : attachMeasuredAllocation(inspectedAppMetrics, fallbackAppMetrics, 'macOS app'),
+  'app',
+)
 const dmgMetrics = attachBaselineDelta(inspectionMetric(validReleaseDmgManifest, 'macos-dmg') ?? fallbackDmgMetrics, 'dmg')
 const windowsInstallerMetrics = attachBaselineDelta(
   inspectionMetric(validReleaseWindowsNsisManifest, 'nsis-installer') ??
@@ -417,6 +453,24 @@ const runtimeDshMetrics = attachBaselineDelta(
     await directoryMetrics(resolve(argValue('--runtime-dsh', resolve(root, 'runtime/dsh')))),
   'runtimeDsh',
 )
+const rawRuntimeSeaMetrics = inspectionMetric(validReleaseManifest, 'runtime-sea') ??
+  await directoryMetrics(resolve(argValue('--runtime-sea', resolve(root, `runtime/sea/${runtimePlatform}`))))
+const baselineRuntimeNode = packageBaselineSourceTree(baselineFixture, runtimePlatform, 'runtime-node')
+const baselineRuntimeDsh = packageBaselineSourceTree(baselineFixture, runtimePlatform, 'runtime-dsh')
+const runtimeSeaMetrics = rawRuntimeSeaMetrics?.status === 'present' &&
+    Number.isSafeInteger(baselineRuntimeNode?.bytes) && Number.isSafeInteger(baselineRuntimeDsh?.bytes)
+  ? {
+      ...rawRuntimeSeaMetrics,
+      baselineVersion: baselineFixture.baselineVersion,
+      baselineStatus: baselineRuntimeNode.status === 'canonical' && baselineRuntimeDsh.status === 'canonical'
+        ? 'canonical-combined'
+        : 'reference-combined',
+      baselineBytes: baselineRuntimeNode.bytes + baselineRuntimeDsh.bytes,
+      baselineFiles: baselineRuntimeNode.files + baselineRuntimeDsh.files,
+      deltaBytes: rawRuntimeSeaMetrics.bytes - baselineRuntimeNode.bytes - baselineRuntimeDsh.bytes,
+      deltaFiles: rawRuntimeSeaMetrics.files - baselineRuntimeNode.files - baselineRuntimeDsh.files,
+    }
+  : rawRuntimeSeaMetrics
 const profileTemplateMetrics = attachBaselineDelta(
   inspectionMetric(validReleaseManifest, 'profile-template') ??
     await directoryMetrics(resolve(argValue('--profile-template', resolve(root, 'runtime/profile-template')))),
@@ -478,8 +532,91 @@ const foreignRuntimePaths = foreignRuntimePathsFromManifests([
 if (foreignRuntimePaths.length > 0) {
   throw new Error(`package report 检测到异平台 Runtime：${foreignRuntimePaths.join(', ')}`)
 }
+const schema6Report = validReleaseManifest?.schemaVersion === 6
+const runtimeAcceptanceArgument = argValue(
+  '--runtime-acceptance',
+  resolve(root, `runtime/staging/sea-performance-${runtimePlatform}.json`),
+)
+const explicitRuntimeAcceptance = hasArg('--runtime-acceptance')
+const runtimeAcceptanceEvidence = explicitRuntimeAcceptance
+  ? await requiredJson(resolve(runtimeAcceptanceArgument), 'Runtime acceptance evidence')
+  : await optionalJson(resolve(runtimeAcceptanceArgument))
+const runtimeOnDeviceArgument = argValue(
+  '--runtime-on-device',
+  resolve(root, `runtime/staging/sea-on-device-${runtimePlatform}.json`),
+)
+const explicitRuntimeOnDevice = hasArg('--runtime-on-device')
+const runtimeOnDeviceEvidence = explicitRuntimeOnDevice
+  ? await requiredJson(resolve(runtimeOnDeviceArgument), 'Runtime on-device evidence')
+  : await optionalJson(resolve(runtimeOnDeviceArgument))
+let runtimeAcceptance = { status: 'missing' }
+if (schema6Report && runtimeAcceptanceEvidence !== null) {
+  if (runtimeOnDeviceEvidence === null) {
+    throw new Error('Runtime acceptance evidence 存在时必须提供当前设备的 Runtime on-device evidence')
+  }
+  const schema = JSON.parse(await readFile(resolve(root, 'runtime/manifest/sea-performance.schema.json'), 'utf8'))
+  const validate = new Ajv2020({ strict: false }).compile(schema)
+  if (!validate(runtimeAcceptanceEvidence)) {
+    throw new Error(`Runtime acceptance evidence schema 无效：${JSON.stringify(validate.errors)}`)
+  }
+  const onDeviceSchema = JSON.parse(await readFile(resolve(root, 'runtime/manifest/sea-on-device.schema.json'), 'utf8'))
+  const validateOnDevice = new Ajv2020({ strict: false }).compile(onDeviceSchema)
+  if (!validateOnDevice(runtimeOnDeviceEvidence)) {
+    throw new Error(`Runtime on-device evidence schema 无效：${JSON.stringify(validateOnDevice.errors)}`)
+  }
+  runtimeAcceptance = summarizeRuntimeAcceptance(runtimeAcceptanceEvidence, {
+    applicationVersion: runtimeLock.applicationVersion,
+    target: runtimePlatform,
+    dshVersion: runtimeLock.dsh.version,
+    nodeVersion: runtimeLock.node.version,
+    seaSha256: validReleaseManifest.runtime.executable.sha256,
+  }, runtimeOnDeviceEvidence)
+}
+
+function firstRunFootprint() {
+  if (!schema6Report || runtimeAcceptance.status !== 'present') return { status: 'missing' }
+  const installTree = runtimePlatform === 'darwin-arm64' ? appMetrics : windowsInstalledTreeMetrics
+  if (installTree.status !== 'present') return { status: 'missing-install-tree' }
+  const external = runtimeAcceptance.firstRun
+  const total = {
+    files: installTree.files + external.totalFiles,
+    bytes: installTree.bytes + external.totalBytes,
+    ...(Number.isSafeInteger(installTree.allocatedBytes)
+      ? { allocatedBytes: installTree.allocatedBytes + external.totalAllocatedBytes }
+      : { allocatedBytesStatus: installTree.allocatedBytesStatus ?? 'unavailable-on-platform' }),
+  }
+  const baseline = baselineForArtifactKind(
+    runtimePlatform === 'darwin-arm64' ? 'macos-app' : 'windows-installed-tree',
+  )
+  return {
+    status: 'present',
+    installTree: {
+      files: installTree.files,
+      bytes: installTree.bytes,
+      ...(Number.isSafeInteger(installTree.allocatedBytes)
+        ? { allocatedBytes: installTree.allocatedBytes }
+        : { allocatedBytesStatus: installTree.allocatedBytesStatus ?? 'unavailable-on-platform' }),
+    },
+    runtimeOwnedExternal: {
+      files: external.totalFiles,
+      bytes: external.totalBytes,
+      allocatedBytes: external.totalAllocatedBytes,
+    },
+    total,
+    baseline: baseline === null ? { status: 'missing' } : {
+      version: baselineFixture.baselineVersion,
+      status: baseline.status,
+      files: baseline.files,
+      bytes: baseline.bytes,
+      allocatedBytesStatus: baselineFixture.measurement?.allocatedBytes ?? 'not-recorded',
+      ...(Number.isSafeInteger(baseline.files) ? { deltaFiles: total.files - baseline.files } : {}),
+      ...(Number.isSafeInteger(baseline.bytes) ? { deltaBytes: total.bytes - baseline.bytes } : {}),
+    },
+  }
+}
+
 const report = {
-  schemaVersion: 2,
+  schemaVersion: schema6Report ? 3 : 2,
   application: { name: 'DeepShell Agent', version },
   generatedAt: new Date().toISOString(),
   platform: { os: process.platform, arch: process.arch },
@@ -490,11 +627,18 @@ const report = {
     windowsInstaller: windowsInstallerMetrics,
     windowsInstalledTree: windowsInstalledTreeMetrics,
     windowsPortable: windowsPortableMetrics,
-    runtimeNode: runtimeNodeMetrics,
-    runtimeDsh: runtimeDshMetrics,
+    ...(schema6Report ? { runtimeSea: runtimeSeaMetrics } : {
+      runtimeNode: runtimeNodeMetrics,
+      runtimeDsh: runtimeDshMetrics,
+    }),
     profileTemplate: profileTemplateMetrics,
   },
   foreignRuntimePaths,
+  ...(schema6Report ? {
+    runtime: validReleaseManifest.runtime,
+    runtimeAcceptance,
+    firstRunFootprint: firstRunFootprint(),
+  } : {}),
   manifests: {
     releasePackageManifest: releaseManifestSummary,
     releaseDmgManifest: releaseDmgManifestSummary,

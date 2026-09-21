@@ -44,14 +44,14 @@ DeepShell Agent 不重新实现通用 Agent Framework，也不维护平行 Web C
 |---|---|---|
 | ADR-001 | 使用 Tauri 2 + Rust 作为 Desktop Shell | 已确定 |
 | ADR-002 | 直接复用官方 DSH Web UI；差异化界面使用 TypeScript + React 的 DSH Client/UI Plugin | 已确定 |
-| ADR-003 | 使用随应用分发的 Node.js 运行固定版本 DSH，最终用户无须安装 Node/npm/pnpm | 已确定 |
+| ADR-003 | 将 Node.js 与固定版本 DSH 作为一个平台 Runtime 单元分发；Release 可使用已验证的 SEA executable，开发阶段保留显式 Standard Node 对照路径；最终用户无须安装 Node/npm/pnpm | 已确定 |
 | ADR-004 | 使用 DSH Agent Runtime，不自研第二套 Session、Tool、Skill、Sandbox、Approval 或 Attachment Runtime | 已确定 |
 | ADR-005 | Rust 不进入模型工具执行链，只负责桌面能力和 DSH Sidecar 生命周期 | 已确定 |
 | ADR-006 | DSH Host 在回环地址上托管官方 Web UI 和 API，使 UI 与 DSH API 同源 | POC 门禁 |
 | ADR-007 | 不 fork 官方 Web UI、不修改 DOM、不导入私有 React 实现；只使用 DSH 公开 Plugin、Slot、Service、Profile 和 Bundle 契约 | 已确定 |
 | ADR-008 | 一个应用级 DSH Profile；General/Coding/Work 映射为按 Session 选择的 DSH Agent Preset，React Plugin 只负责入口与展示 | 已确定 |
 | ADR-009 | 外部 SaaS 优先经 MCP 接入；高权限扩展仅允许 First-party Plugin 和用户显式配置的 MCP Server | 已确定 |
-| ADR-010 | 应用、Node、DSH、First-party Plugin 作为一个签名版本单元原子升级 | 已确定 |
+| ADR-010 | 应用、内嵌 Node、DSH、SEA packager/patch 与 First-party Plugin 作为一个签名版本单元原子升级 | 已确定 |
 | ADR-011 | POC 与 V1 使用 DSH 官方 credentials-local；系统 Keychain/Credential Manager Provider 延后 | 已确定 |
 
 这里的“Full DSH”指完整保留所选官方运行组合所需的核心能力与依赖，不代表默认安装或启用所有 Provider、实验包和第三方 Plugin。构建产物必须最小权限启用，不能把“完整依赖”误解为“全部能力同时暴露给模型”。
@@ -96,9 +96,10 @@ V1 至少包含两个长期运行进程：
 
 ```text
 DeepShell Agent (Tauri/Rust)
-└── Node.js Sidecar
-    └── DSH Host
-        └── 按需启动的工具子进程（Shell、MCP stdio 等）
+└── 受管 DSH Runtime Sidecar
+    ├── Release：平台 SEA executable，内嵌 Node.js + 固定 DSH
+    ├── 开发/验证：显式 Standard Node.js + 固定 DSH 路径
+    └── 按需启动的工具子进程（Shell、MCP stdio 等）
 ```
 
 职责如下：
@@ -107,7 +108,7 @@ DeepShell Agent (Tauri/Rust)
 |---|---|---|
 | Tauri/Rust | 单实例、窗口、菜单、托盘、通知、更新、Sidecar 监管、最小原生对话框 | Agent Loop、工具代理、Session 业务状态、第二套权限判断 |
 | WebView/DSH React UI | 官方交互、状态协调、流式渲染、审批、设置以及 DeepShell UI 扩展 | 直接持有长期 Secret、执行 Shell、决定安全策略 |
-| Node/DSH | Agent Loop、Session、模型、Tools、Skills、MCP、Workspace、Sandbox、Approval、持久化 | 窗口生命周期、应用更新、系统级 UI |
+| DSH Runtime Sidecar | Agent Loop、Session、模型、Tools、Skills、MCP、Workspace、Sandbox、Approval、持久化 | 窗口生命周期、应用更新、系统级 UI |
 
 模型工具调用的唯一正常路径是：
 
@@ -130,7 +131,7 @@ Tauri 启动
   → 获取单实例锁
   → 解析平台应用数据目录
   → 创建独立 DSH_HOME 与运行目录
-  → 以 POC 门禁选定的回环 bind_address 和端口 0 启动固定 Node + DSH
+  → 校验并以 POC 门禁选定的回环 bind_address 和端口 0 启动固定平台 DSH Runtime（Release SEA 或显式 Standard 开发路径）
   → 从受控握手读取实际端口、进程作用域启动令牌与绑定事实
   → 完成 Host 健康检查
   → WebView 仅一次导航至含进程作用域 token 的授权 URL
@@ -438,23 +439,26 @@ Sandbox 保证可能随平台和安装环境变化。UI 必须展示当前会话
 
 ### 9.2 Sidecar 分发
 
-V1 优先采用“平台 Node Runtime + 预构建的生产 DSH 资源树”，而不是把 DSH 强制编译成单一 `pkg` 可执行文件。原因是 DSH 的插件加载、动态资源和可能的 native module 更适合保留标准 Node 运行语义。
+`v0.1.4` 及更早发布基线采用“平台 Node Runtime + 预构建的生产 DSH 资源树”。`v0.1.5` 当前分支将 Release 路线迁移为锁定 `@yao-pkg/pkg` Enhanced SEA：每个平台分发一个内嵌固定 Node.js、完整所需 DSH production closure 和官方 Web UI 的 SEA executable；开发/验证仍保留显式 Standard Runtime 对照路径，但该完整文件树不得进入 `v0.1.5` Release 包。
 
 构建产物要求：
 
 - 每个 target triple（目标平台架构）独立构建和签名；
 - 生产依赖在 CI 中冻结，不在用户机器运行 `npm install`；
-- 启动入口、资源路径和 native module 在安装后的只读目录中可解析；
+- SEA executable、build receipt、Runtime manifest、Native Addon inventory 与锁定 packager patch 摘要一致；
+- Native Addon 只释放到应用控制、按平台和 SEA SHA256 隔离的 Cache；官方 DSH module proxy 继续位于应用数据目录；
 - 运行期数据全部写入平台应用数据目录，不修改应用安装目录；
 - macOS notarization（公证）和 Windows code signing（代码签名）覆盖应用与 Sidecar。
 
-如果 POC 证明标准 Node 资源树无法满足签名、体积或更新要求，才评估 SEA/pkg 等单文件方式；任何替换都必须重新验证 DSH Plugin 和 native module。
+DSH、Node、SEA packager/patch 或 First-party Plugin 任一变化都会使 Runtime 与性能证据失效，必须作为一个 Compatibility Set 原子重建并重新验证；运行时不得浮动安装或回退到未声明的 Standard Runtime。
 
 > ⚠️ **`v0.1.3` 已知未满足项（`REL-022`）**：该已发布基线不满足“发布包只包含目标平台所需的运行时文件”（英文版 §9.3 Package content rules）。
 >
 > 实测：Windows NSIS 安装包**同时打包两套 Node 运行时**——`runtime/node/darwin-arm64` 与 `runtime/node/win32-x64`，其中 **macOS 部分 4800 文件 / 187.5 MB 在 Windows 上完全无用**（安装后总占用 32226 文件 / 512.03 MB）。macOS `.app` 侧存在对称的 `win32-x64` 浪费。
 >
 > `v0.1.4` preview release 已通过平台专用 Tauri 配置与验证规则实现并独立验证两条平台路线：macOS `.app` 只包含 `darwin-arm64` Node，Windows 安装树与 portable ZIP 只包含 `win32-x64` Node。Windows 真机验收与最终 macOS C0 回归均已登记在 `docs/releases/v0.1.4.zh.md`。macOS Developer ID 签名/公证与 Windows 代码签名仍是独立的正式分发门禁。
+>
+> 当前 `v0.1.5` 分支进一步以平台 SEA executable 替代上述 Standard Runtime 安装树（`REL-028`）。macOS 实现已通过自动化打包、真实浏览器 Ready Gate、性能、Cache、包体占用证据、由用户确认的 `MAC-01`～`MAC-09` 真机矩阵，以及最终 macOS review-fix-loop；clean commit 重建仍待执行。Windows 原生构建和真机验收尚未执行。本段是进行中的架构迁移记录，不代表已发布的跨平台结论。
 
 ### 9.3 原子更新与迁移
 
@@ -513,7 +517,7 @@ V1 默认不上传对话、文件内容或 Tool Output。若未来加入产品�
 | 能力 | 实现归属 |
 |---|---|
 | Tauri Window/Lifecycle/Single Instance | DeepShell Agent |
-| 固定 Node + DSH Sidecar | DeepShell Agent 封装，复用 DSH |
+| DSH Runtime Sidecar 监管（Release SEA / Standard 开发路径） | DeepShell Agent 封装，复用 DSH |
 | Official DSH Web UI | 直接复用 DSH |
 | Chat/Session/Streaming/History/Cancellation | DSH 官方 Host 与 Web UI |
 | DeepShell Client/UI 扩展 | TypeScript + React 的 DSH Plugin |

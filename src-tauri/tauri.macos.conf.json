@@ -2,7 +2,8 @@
   "bundle": {
     "targets": ["app", "dmg"],
     "resources": {
-      "../runtime/node/darwin-arm64/": "runtime/node/darwin-arm64/"
+      "../runtime/sea/darwin-arm64/": "runtime/sea/darwin-arm64/",
+      "../runtime/node/darwin-arm64/LICENSE": "licenses/Node.js-LICENSE"
     },
     "macOS": {
       "minimumSystemVersion": "13.0"

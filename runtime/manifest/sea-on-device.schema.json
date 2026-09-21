@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schemaVersion", "applicationVersion", "target", "seaSha256", "nativeCache", "controller", "passed"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "applicationVersion": { "const": "0.1.5" },
+    "target": { "enum": ["darwin-arm64", "win32-x64"] },
+    "seaSha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+    "nativeCache": { "$ref": "#/$defs/metrics" },
+    "controller": { "$ref": "#/$defs/metrics" },
+    "passed": { "const": true }
+  },
+  "$defs": {
+    "metrics": {
+      "type": "object",
+      "required": ["files", "bytes", "allocatedBytes"],
+      "properties": {
+        "files": { "type": "integer", "minimum": 0 },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "allocatedBytes": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -44,14 +44,14 @@ DeepShell Agent does not reimplement a general Agent Framework and does not main
 |---|---|---|
 | ADR-001 | Use Tauri 2 + Rust as the Desktop Shell | Decided |
 | ADR-002 | Reuse the official DSH Web UI directly; differentiated UI uses TypeScript + React DSH Client/UI Plugins | Decided |
-| ADR-003 | Use bundled Node.js to run a pinned DSH version; end users do not need Node/npm/pnpm | Decided |
+| ADR-003 | Bundle Node.js and pinned DSH as one platform Runtime unit; Release may use a verified SEA executable while development retains an explicit Standard Node comparison path; end users do not need Node/npm/pnpm | Decided |
 | ADR-004 | Use DSH Agent Runtime; do not build a second Session, Tool, Skill, Sandbox, Approval, or Attachment Runtime | Decided |
 | ADR-005 | Rust does not enter the model tool-execution chain; it only handles desktop capabilities and DSH Sidecar lifecycle | Decided |
 | ADR-006 | DSH Host serves the official Web UI and API on loopback so UI and DSH API stay same-origin | POC gate |
 | ADR-007 | Do not fork the official Web UI, mutate DOM, or import private React implementation; use only public DSH Plugin, Slot, Service, Profile, and Bundle contracts | Decided |
 | ADR-008 | Use one application-level DSH Profile; General/Coding/Work map to Session-selected DSH Agent Presets, while React Plugins handle entry points and presentation | Decided |
 | ADR-009 | Prefer MCP for external SaaS; high-privilege extensions are limited to first-party Plugins and user-configured MCP Servers | Decided |
-| ADR-010 | App, Node, DSH, and first-party Plugins upgrade atomically as one signed version unit | Decided |
+| ADR-010 | App, embedded Node, DSH, SEA packager/patches, and first-party Plugins upgrade atomically as one signed version unit | Decided |
 | ADR-011 | POC and V1 use official DSH `credentials-local`; system Keychain/Credential Manager Providers are deferred | Decided |
 
 “Full DSH” means keeping the core capabilities and dependencies required by the selected official runtime combination. It does not mean installing or enabling every Provider, experimental package, or third-party Plugin by default. Build artifacts must enable minimum permissions; “complete dependency set” must not be confused with “every capability exposed to the model”.
@@ -96,9 +96,10 @@ V1 has at least two long-running processes:
 
 ```text
 DeepShell Agent (Tauri/Rust)
-└── Node.js Sidecar
-    └── DSH Host
-        └── on-demand tool child processes (Shell, MCP stdio, etc.)
+└── managed DSH Runtime Sidecar
+    ├── Release: platform SEA executable embedding Node.js + pinned DSH
+    ├── Development/verification: explicit Standard Node.js + pinned DSH path
+    └── on-demand tool child processes (Shell, MCP stdio, etc.)
 ```
 
 Responsibilities:
@@ -107,7 +108,7 @@ Responsibilities:
 |---|---|---|
 | Tauri/Rust | Single instance, windows, menu, tray, notifications, updates, Sidecar supervision, minimal native dialogs | Agent loop, tool proxying, Session business state, second permission judgment |
 | WebView/DSH React UI | Official interaction, state coordination, streaming rendering, approval, settings, and DeepShell UI extensions | Long-lived secrets, Shell execution, safety-policy decisions |
-| Node/DSH | Agent loop, Sessions, models, Tools, Skills, MCP, Workspace, Sandbox, Approval, persistence | Window lifecycle, app updates, system-level UI |
+| DSH Runtime Sidecar | Agent loop, Sessions, models, Tools, Skills, MCP, Workspace, Sandbox, Approval, persistence | Window lifecycle, app updates, system-level UI |
 
 The only normal model tool-call path is:
 
@@ -130,7 +131,7 @@ Tauri starts
   → acquire single-instance lock
   → resolve platform app data directory
   → create independent DSH_HOME and runtime directory
-  → start pinned Node + DSH on selected loopback bind_address and port 0
+  → verify and start the pinned platform DSH Runtime (Release SEA or explicit Standard development path) on selected loopback bind_address and port 0
   → read actual port, process-scoped startup token, and binding facts from a controlled handshake
   → complete Host health check
   → navigate WebView once to an authorized URL containing the process-scoped token
@@ -425,17 +426,19 @@ MCP Servers are installed only with explicit user action. First-party MCP may re
 
 ### 9.1 Bundled runtime
 
-The app ships with:
+Release packages ship with:
 
 - DeepShell Agent Tauri binary;
-- bundled Node.js executable and required libraries;
-- pinned DSH package and production dependency tree;
+- a platform-specific SEA Runtime that embeds the pinned Node.js and complete required DSH production closure;
+- locked SEA build receipt, Runtime manifest, native-addon inventory, and verified packager patches;
 - DeepShell first-party Bundle/Profile/Preset/Plugin files;
 - runtime lock manifest and checksums.
 
+The repository and development verification path may materialize a Standard Node.js + DSH production tree, but that tree must not enter a `v0.1.5` Release package. Mutable Profile data, credentials, Sessions, official DSH module proxies, and the controlled native-addon cache remain outside the read-only SEA executable.
+
 End users must not need to install Node.js, npm, pnpm, DSH, or build tools.
 
-No floating install is allowed at runtime. If DSH or a first-party Plugin upgrades, App + Node + DSH + Plugin must be built, tested, signed, and released as one compatibility set.
+No floating install is allowed at runtime. If DSH, Node, the SEA packager/patches, or a first-party Plugin upgrades, the complete Compatibility Set must be rebuilt, tested, signed, and released together.
 
 ### 9.2 Platform targets
 
@@ -466,6 +469,8 @@ Package verification must compare E2E and Release artifacts to prove test-only c
 > ⚠️ **Known `v0.1.3` gap (`REL-022`)**: that released baseline does not satisfy the first rule above. Its Windows NSIS package contains both `runtime/node/darwin-arm64` and `runtime/node/win32-x64`; the **4,800-file / 187.5 MB macOS runtime is entirely unused on Windows** (the installed tree totals 32,226 files / 512.03 MB). The macOS `.app` has the symmetric `win32-x64` waste.
 >
 > The `v0.1.4` preview release implements and independently validates both platform paths with platform-specific Tauri configuration and verification rules. The macOS `.app` contains only `darwin-arm64` Node; the Windows installed tree and portable ZIP contain only `win32-x64` Node. Windows on-device acceptance and the final macOS C0 regression are recorded in `docs/releases/v0.1.4.md`. Developer ID signing/notarization and Windows code signing remain separate formal-distribution gates.
+>
+> The active `v0.1.5` branch replaces that installed Standard Runtime tree with a platform SEA executable (`REL-028`). The macOS implementation has passed automated packaging, real-browser Ready Gate, performance, cache, package-footprint evidence, the user-confirmed `MAC-01` through `MAC-09` on-device matrix, and the final macOS review-fix-loop. A clean-commit rebuild remains pending. Windows native build and on-device acceptance remain unverified. This paragraph records an active architecture migration, not a published cross-platform result.
 
 ### 9.4 Updates and migration
 
@@ -488,7 +493,7 @@ If migration fails, the app stops and shows recovery instructions instead of sil
 | Capability | Owner |
 |---|---|
 | Desktop lifecycle, packaging, signing, updater | DeepShell Agent / Tauri |
-| Node + DSH Sidecar supervision | DeepShell Agent wrapper, reusing DSH |
+| DSH Runtime Sidecar supervision (Release SEA / Standard development path) | DeepShell Agent wrapper, reusing DSH |
 | Official DSH Web UI | Reused directly from DSH |
 | Chat/Session/Streaming/History/Cancellation | Official DSH Host and Web UI |
 | DeepShell Client/UI extensions | TypeScript + React DSH Plugin |

@@ -1,15 +1,104 @@
 use crate::error::{AppError, ErrorCode};
 use crate::logging;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{
     fs,
+    io::Read,
     path::{Path, PathBuf},
     time::{SystemTime, UNIX_EPOCH},
 };
 
-const PREVIOUS_APPLICATION_VERSION_FOR_SESSION_BACKUP: &str = "0.1.1";
-const PREVIOUS_DSH_VERSION_FOR_SESSION_BACKUP: &str = "0.1.2-rc.1";
-const TARGET_DSH_VERSION_FOR_SESSION_BACKUP: &str = "0.1.5-rc.1";
+#[cfg(not(debug_assertions))]
+const SEA_RUNTIME_MANIFEST: &str = "sea-runtime-manifest.json";
+const SEA_BUILD_RECEIPT: &str = "sea-build-receipt.json";
+
+// `Standard` 与 `Sea` 由编译 profile 互斥选择，因此任一单独构建都会有一个未构造分支。
+#[allow(dead_code)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RuntimeLaunch {
+    Standard {
+        executable: PathBuf,
+        dsh_entry: PathBuf,
+    },
+    Sea {
+        executable: PathBuf,
+        manifest: PathBuf,
+        sha256: String,
+    },
+}
+
+impl RuntimeLaunch {
+    pub fn executable(&self) -> &Path {
+        match self {
+            Self::Standard { executable, .. } | Self::Sea { executable, .. } => executable,
+        }
+    }
+
+    pub fn is_sea(&self) -> bool {
+        matches!(self, Self::Sea { .. })
+    }
+
+    pub fn sea_sha256(&self) -> Option<&str> {
+        match self {
+            Self::Sea { sha256, .. } => Some(sha256),
+            Self::Standard { .. } => None,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct SeaRuntimeManifest {
+    schema_version: u32,
+    runtime_format: String,
+    application_version: String,
+    platform: String,
+    finalized_for_package: bool,
+    executable: SeaManifestExecutable,
+    build_receipt: SeaManifestDigestFile,
+    native_inventory: SeaManifestDigestFile,
+    dsh: SeaManifestDsh,
+    node: serde_json::Value,
+    packager: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SeaManifestExecutable {
+    file: String,
+    bytes: u64,
+    sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SeaManifestDigestFile {
+    file: String,
+    sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SeaManifestDsh {
+    package: String,
+    version: String,
+    patches: Vec<SeaManifestDshPatch>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SeaManifestDshPatch {
+    package: String,
+    version: String,
+    sha256: String,
+}
+
+const PREVIOUS_APPLICATION_VERSION_FOR_SESSION_BACKUP: &str = "0.1.4";
+const PREVIOUS_DSH_VERSION_FOR_SESSION_BACKUP: &str = "0.1.5-rc.1";
+const TARGET_DSH_VERSION_FOR_SESSION_BACKUP: &str = "0.1.5-rc.2";
+const DSH_CLIENT_MODULES_PATCH_SHA256: &str =
+    "218efdf63541195b7c94e4fd84fe9e0d02d847ec924d4674d5678da905a04f4b";
 const MAX_SESSION_BACKUPS: usize = 3;
 
 /// 去掉 Windows 的**逐字（verbatim）路径前缀** `\\?\`。
@@ -52,8 +141,9 @@ pub struct AppPaths {
     pub session_backups: PathBuf,
     pub ready_file: PathBuf,
     pub ownership_file: PathBuf,
-    pub node: PathBuf,
-    pub dsh_entry: PathBuf,
+    pub resources_root: PathBuf,
+    pub runtime_launch: RuntimeLaunch,
+    pub native_cache_root: PathBuf,
     pub profile_template: PathBuf,
 }
 
@@ -72,6 +162,8 @@ impl AppPaths {
         let dsh_home = app_data.join("dsh-home");
         let runtime_state = app_data.join("runtime-state");
         let runtime = resources.join("runtime");
+        let runtime_launch = resolve_runtime_launch(&runtime)?;
+        let profile_template = profile_template_path(&runtime);
         Ok(Self {
             workspace: app_data.join("bootstrap-workspace"),
             process_home: app_data.join("process-home"),
@@ -79,9 +171,10 @@ impl AppPaths {
             session_backups: app_data.join("session-backups"),
             ready_file: runtime_state.join("client-ready.json"),
             ownership_file: runtime_state.join("ownership.json"),
-            node: runtime.join(runtime_node_path()),
-            dsh_entry: runtime.join("dsh/node_modules/@deepseek-ai/dsh/lib/bin.js"),
-            profile_template: runtime.join("profile-template"),
+            resources_root: resources,
+            runtime_launch,
+            native_cache_root: app_data.join("runtime-cache/native"),
+            profile_template,
             app_data,
             dsh_home,
         })
@@ -98,11 +191,25 @@ impl AppPaths {
         ] {
             private_directory(directory)?;
         }
-        if !self.node.is_file() || !self.dsh_entry.is_file() || !self.profile_template.is_dir() {
+        if !self.runtime_launch.executable().is_file() || !self.profile_template.is_dir() {
             return Err(AppError::new(
                 ErrorCode::RuntimeUnavailable,
-                "Bundled Node、DSH 或 Profile 模板缺失",
+                "Runtime executable 或 Profile 模板缺失",
             ));
+        }
+        match &self.runtime_launch {
+            RuntimeLaunch::Standard { dsh_entry, .. } if !dsh_entry.is_file() => {
+                return Err(AppError::new(
+                    ErrorCode::RuntimeUnavailable,
+                    "开发用 DSH entry 缺失",
+                ));
+            }
+            RuntimeLaunch::Sea {
+                executable,
+                manifest,
+                sha256,
+            } => verify_sea_runtime_manifest(executable, manifest, sha256)?,
+            RuntimeLaunch::Standard { .. } => {}
         }
         self.backup_sessions_before_upgrade()?;
         self.materialize_profile()?;
@@ -378,12 +485,159 @@ fn current_timestamp_ms() -> u128 {
         .as_millis()
 }
 
+#[cfg(debug_assertions)]
+fn resolve_runtime_launch(_resource_runtime: &Path) -> Result<RuntimeLaunch, AppError> {
+    #[cfg(test)]
+    let runtime = _resource_runtime.to_path_buf();
+    #[cfg(not(test))]
+    let runtime = Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime");
+    Ok(RuntimeLaunch::Standard {
+        executable: runtime.join(runtime_node_path()),
+        dsh_entry: runtime.join("dsh/node_modules/@deepseek-ai/dsh/lib/bin.js"),
+    })
+}
+
+#[cfg(not(debug_assertions))]
+fn resolve_runtime_launch(resource_runtime: &Path) -> Result<RuntimeLaunch, AppError> {
+    let directory = resource_runtime.join("sea").join(runtime_platform());
+    let manifest = directory.join(SEA_RUNTIME_MANIFEST);
+    let value = read_sea_runtime_manifest(&manifest)?;
+    Ok(RuntimeLaunch::Sea {
+        executable: directory.join(&value.executable.file),
+        manifest,
+        sha256: value.executable.sha256,
+    })
+}
+
+#[cfg(debug_assertions)]
+fn profile_template_path(_resource_runtime: &Path) -> PathBuf {
+    #[cfg(test)]
+    {
+        _resource_runtime.join("profile-template")
+    }
+    #[cfg(not(test))]
+    {
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../runtime/profile-template")
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn profile_template_path(resource_runtime: &Path) -> PathBuf {
+    resource_runtime.join("profile-template")
+}
+
+fn read_sea_runtime_manifest(path: &Path) -> Result<SeaRuntimeManifest, AppError> {
+    let bytes = fs::read(path).map_err(runtime_error)?;
+    serde_json::from_slice(&bytes).map_err(|error| {
+        AppError::new(
+            ErrorCode::RuntimeUnavailable,
+            format!("SEA runtime manifest 无效：{error}"),
+        )
+    })
+}
+
+fn verify_sea_runtime_manifest(
+    executable: &Path,
+    manifest_path: &Path,
+    expected_sha256: &str,
+) -> Result<(), AppError> {
+    let manifest = read_sea_runtime_manifest(manifest_path)?;
+    if manifest.schema_version != 1
+        || manifest.runtime_format != "enhanced-sea"
+        || manifest.application_version != env!("CARGO_PKG_VERSION")
+        || manifest.platform != runtime_platform()
+        || !manifest.finalized_for_package
+        || manifest.executable.file != runtime_sea_executable()
+        || manifest.executable.sha256 != expected_sha256
+        || manifest.build_receipt.file != SEA_BUILD_RECEIPT
+        || manifest.native_inventory.file != "native-addons.json"
+        || !is_sha256(&manifest.build_receipt.sha256)
+        || !is_sha256(&manifest.native_inventory.sha256)
+        || manifest.dsh.package != "@deepseek-ai/dsh"
+        || manifest.dsh.version != TARGET_DSH_VERSION_FOR_SESSION_BACKUP
+        || manifest.dsh.patches.len() != 1
+        || manifest.dsh.patches[0].package != "@deepseek-ai/dsh-client-modules"
+        || manifest.dsh.patches[0].version != TARGET_DSH_VERSION_FOR_SESSION_BACKUP
+        || manifest.dsh.patches[0].sha256 != DSH_CLIENT_MODULES_PATCH_SHA256
+        || !manifest.node.is_object()
+        || !manifest.packager.is_object()
+    {
+        return Err(AppError::new(
+            ErrorCode::RuntimeUnavailable,
+            "SEA runtime manifest 与当前应用、平台或最终打包状态不匹配",
+        ));
+    }
+    let metadata = fs::metadata(executable).map_err(runtime_error)?;
+    if metadata.len() != manifest.executable.bytes || sha256_file(executable)? != expected_sha256 {
+        return Err(AppError::new(
+            ErrorCode::RuntimeUnavailable,
+            "SEA executable 与 runtime manifest 摘要不匹配",
+        ));
+    }
+    let directory = manifest_path.parent().ok_or_else(|| {
+        AppError::new(
+            ErrorCode::RuntimeUnavailable,
+            "SEA runtime manifest 缺少父目录",
+        )
+    })?;
+    for digest_file in [&manifest.build_receipt, &manifest.native_inventory] {
+        if sha256_file(&directory.join(&digest_file.file))? != digest_file.sha256 {
+            return Err(AppError::new(
+                ErrorCode::RuntimeUnavailable,
+                format!("SEA 附属文件 {} 摘要不匹配", digest_file.file),
+            ));
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn sha256_file(path: &Path) -> Result<String, AppError> {
+    let mut file = fs::File::open(path).map_err(runtime_error)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let count = file.read(&mut buffer).map_err(runtime_error)?;
+        if count == 0 {
+            break;
+        }
+        hasher.update(&buffer[..count]);
+    }
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+fn is_sha256(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
 #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn runtime_platform() -> &'static str {
+    "darwin-arm64"
+}
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+fn runtime_platform() -> &'static str {
+    "win32-x64"
+}
+
+#[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+fn runtime_sea_executable() -> &'static str {
+    "deepshell-runtime"
+}
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+fn runtime_sea_executable() -> &'static str {
+    "deepshell-runtime.exe"
+}
+
+#[cfg(all(debug_assertions, target_os = "macos", target_arch = "aarch64"))]
 fn runtime_node_path() -> &'static str {
     "node/darwin-arm64/bin/node"
 }
 
-#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+#[cfg(all(debug_assertions, target_os = "windows", target_arch = "x86_64"))]
 fn runtime_node_path() -> &'static str {
     "node/win32-x64/node.exe"
 }
@@ -639,22 +893,36 @@ mod tests {
                 PathBuf::from(r"\\?\D:\app"),
             )
             .unwrap();
-            assert!(!paths.node.to_string_lossy().contains(r"\\?\"));
+            assert!(!paths
+                .runtime_launch
+                .executable()
+                .to_string_lossy()
+                .contains(r"\\?\"));
             assert!(!paths.workspace.to_string_lossy().contains(r"\\?\"));
+            let RuntimeLaunch::Standard {
+                executable,
+                dsh_entry,
+            } = paths.runtime_launch
+            else {
+                panic!("测试构建必须选择 Standard Runtime")
+            };
             assert_eq!(
-                paths.dsh_entry,
+                dsh_entry,
                 PathBuf::from(r"D:\app\runtime\dsh\node_modules\@deepseek-ai\dsh\lib\bin.js")
             );
             assert_eq!(
-                paths.node,
+                executable,
                 PathBuf::from(r"D:\app\runtime\node\win32-x64\node.exe")
             );
         }
         #[cfg(not(windows))]
         {
             let paths = AppPaths::new(PathBuf::from("/data/app"), PathBuf::from("/app")).unwrap();
+            let RuntimeLaunch::Standard { dsh_entry, .. } = paths.runtime_launch else {
+                panic!("测试构建必须选择 Standard Runtime")
+            };
             assert_eq!(
-                paths.dsh_entry,
+                dsh_entry,
                 PathBuf::from("/app/runtime/dsh/node_modules/@deepseek-ai/dsh/lib/bin.js")
             );
         }
@@ -874,7 +1142,7 @@ mod tests {
             metadata["fromApplicationVersion"].as_str(),
             Some(PREVIOUS_APPLICATION_VERSION_FOR_SESSION_BACKUP)
         );
-        assert_eq!(metadata["toApplicationVersion"].as_str(), Some("0.1.4"));
+        assert_eq!(metadata["toApplicationVersion"].as_str(), Some("0.1.5"));
         assert_eq!(
             metadata["fromDshVersion"].as_str(),
             Some(PREVIOUS_DSH_VERSION_FOR_SESSION_BACKUP)

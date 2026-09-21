@@ -1,0 +1,23 @@
+diff --git a/lib/index.js b/lib/index.js
+index b60880c018700657d8ba9b034f1da3a4aba9ddb1..18bb74a77eaae6ab22dc7799d7bab11a95f0655e 100644
+--- a/lib/index.js
++++ b/lib/index.js
+@@ -643,8 +643,16 @@ var ClientModuleRegistry = class extends Service {
+ 			this.pkgMeta.set(sourceKey, null);
+ 			return null;
+ 		}
+-		const { packageName, path: pkgPath } = located;
+-		const pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
++		const { packageName } = located;
++		let pkgPath = located.path;
++		let pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
++		const fallbackTarget = pkg.dsh?.moduleFallback?.targets?.["."];
++		if (typeof fallbackTarget === "string") {
++			const target = this.nearestPackage(fallbackTarget, packageName);
++			if (target === void 0) throw new Error(`client-modules: managed module fallback for ${packageName} does not resolve to its target package`);
++			pkgPath = target.path;
++			pkg = JSON.parse(readFileSync(pkgPath, "utf8"));
++		}
+ 		const dsh = pkg.dsh;
+ 		const decl = parseDshClient(packageName, dsh !== null && typeof dsh === "object" ? dsh.client : void 0);
+ 		if (decl === void 0 || decl.platform !== "web") {

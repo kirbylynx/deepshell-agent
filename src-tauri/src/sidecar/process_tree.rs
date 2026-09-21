@@ -339,7 +339,7 @@ pub fn recover_registered(
     };
     ensure_supported(&record)?;
     let expected = fs::canonicalize(expected_executable).map_err(runtime_stop_error)?;
-    if record.leader.executable != expected {
+    if !expected_or_legacy_executable(&record.leader.executable, &expected) {
         return quarantine(
             path,
             &mut record,
@@ -774,7 +774,7 @@ pub fn retry_cleanup(path: &Path, expected_executable: &Path) -> Result<(), AppE
     };
     ensure_supported(&record)?;
     let expected = fs::canonicalize(expected_executable).map_err(runtime_stop_error)?;
-    if record.leader.executable != expected {
+    if !expected_or_legacy_executable(&record.leader.executable, &expected) {
         return quarantine(
             path,
             &mut record,
@@ -816,6 +816,36 @@ pub fn unregister(path: &Path) -> Result<(), AppError> {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(runtime_stop_error(error)),
     }
+}
+
+/// `v0.1.5` 首次从 Standard Runtime 切换到 SEA 时，磁盘上可能还留有 `v0.1.4`
+/// 的 ownership record。只接受与当前 SEA 位于同一 `runtime` 根下的那一个精确旧 Node
+/// 路径；这不是通用 fallback，也不会放宽到其他安装目录或任意 Node。
+fn expected_or_legacy_executable(recorded: &Path, expected: &Path) -> bool {
+    if recorded == expected {
+        return true;
+    }
+    let Some(platform_directory) = expected.parent() else {
+        return false;
+    };
+    let Some(sea_directory) = platform_directory.parent() else {
+        return false;
+    };
+    if sea_directory.file_name().is_none_or(|name| name != "sea") {
+        return false;
+    }
+    let Some(runtime_root) = sea_directory.parent() else {
+        return false;
+    };
+    let legacy = match platform_directory
+        .file_name()
+        .and_then(|name| name.to_str())
+    {
+        Some("darwin-arm64") => runtime_root.join("node/darwin-arm64/bin/node"),
+        Some("win32-x64") => runtime_root.join("node/win32-x64/node.exe"),
+        _ => return false,
+    };
+    recorded == legacy
 }
 
 pub fn terminate_registered(
@@ -1277,6 +1307,32 @@ mod tests {
         ] {
             assert!(!same_owned_process(&changed, &identity));
         }
+    }
+
+    #[test]
+    fn accepts_only_the_version_limited_legacy_node_path_for_sea_migration() {
+        let runtime = PathBuf::from("/Applications/DeepShell Agent.app/Contents/Resources/runtime");
+        let sea = runtime.join("sea/darwin-arm64/deepshell-runtime");
+        let legacy = runtime.join("node/darwin-arm64/bin/node");
+        assert!(expected_or_legacy_executable(&sea, &sea));
+        assert!(expected_or_legacy_executable(&legacy, &sea));
+        assert!(!expected_or_legacy_executable(
+            Path::new("/another/install/runtime/node/darwin-arm64/bin/node"),
+            &sea,
+        ));
+        assert!(!expected_or_legacy_executable(
+            runtime.join("node/darwin-arm64/bin/other").as_path(),
+            &sea,
+        ));
+
+        let windows_runtime = PathBuf::from("C:/Program Files/DeepShell Agent/resources/runtime");
+        let windows_sea = windows_runtime.join("sea/win32-x64/deepshell-runtime.exe");
+        let windows_legacy = windows_runtime.join("node/win32-x64/node.exe");
+        assert!(expected_or_legacy_executable(&windows_legacy, &windows_sea));
+        assert!(!expected_or_legacy_executable(
+            &windows_runtime.join("node/darwin-arm64/bin/node"),
+            &windows_sea,
+        ));
     }
 
     #[test]

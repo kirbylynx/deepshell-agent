@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "required": ["schemaVersion", "target", "files", "bytes", "contentSha256", "entries"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "target": { "enum": ["darwin-arm64", "win32-x64"] },
+    "files": { "type": "integer", "minimum": 0 },
+    "bytes": { "type": "integer", "minimum": 0 },
+    "contentSha256": { "pattern": "^[a-f0-9]{64}$" },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "bytes", "sha256"],
+        "properties": {
+          "path": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$" },
+          "bytes": { "type": "integer", "minimum": 0 },
+          "sha256": { "pattern": "^[a-f0-9]{64}$" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -7,7 +7,7 @@ const root = resolve(import.meta.dirname, '../..')
 describe('DSH 上游边界', () => {
   it('固定官方 npm 包且不导入私有源码路径', async () => {
     const pkg = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
-    expect(pkg.devDependencies['@deepseek-ai/dsh']).toBe('0.1.5-rc.1')
+    expect(pkg.devDependencies['@deepseek-ai/dsh']).toBe('0.1.5-rc.2')
     const client = await readFile(resolve(root, 'dsh/bundles/deepshell-desktop/lib/client.js'), 'utf8')
     expect(client).not.toMatch(/@deepseek-ai\/.*\/src\//)
   })

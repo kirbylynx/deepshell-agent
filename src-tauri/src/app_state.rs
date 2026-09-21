@@ -11,26 +11,17 @@ use tauri::{AppHandle, Manager};
 ///
 /// 涉及两个根：
 /// - **应用数据目录** `%APPDATA%\com.deepshell.agent`（`paths.app_data`）；
-/// - **资源根**（安装目录，如 `D:\DeepShell Agent\`）——`AppPaths` 未直接保存它，
-///   但 `paths.node` 恒定位于 `<resources>/runtime/node/<platform>/node.exe`，
-///   故从其**祖先**反推：向上 3 层即 `<resources>`。
+/// - **资源根**（安装目录，如 `D:\DeepShell Agent\`），由 `AppPaths` 显式保存。
 ///
 /// 替换后仍保留相对结构（如 `<RESOURCES>/runtime/node`），诊断价值不降而路径不外泄。
 /// 仅在前缀**恰好以路径分隔符结束**时替换，避免把 `<RESOURCES>-other` 之类的
 /// 同前缀目录误脱敏。
 fn redact_roots(path: &Path, paths: &AppPaths) -> String {
     let text = path.to_string_lossy();
-    let resources = resources_root(paths);
-    let candidates: [(&Path, &str); 2] = match resources {
-        Some(root) => [
-            (paths.app_data.as_path(), "<APP_DATA>"),
-            (root, "<RESOURCES>"),
-        ],
-        None => [
-            (paths.app_data.as_path(), "<APP_DATA>"),
-            (Path::new("\u{0}"), ""),
-        ],
-    };
+    let candidates: [(&Path, &str); 2] = [
+        (paths.app_data.as_path(), "<APP_DATA>"),
+        (paths.resources_root.as_path(), "<RESOURCES>"),
+    ];
     for (root, placeholder) in candidates {
         let root_text = root.to_string_lossy();
         if root_text.is_empty() || root_text == "\u{0}" {
@@ -54,22 +45,6 @@ fn strip_prefix_case_insensitive<'a>(text: &'a str, prefix: &str) -> Option<&'a 
     let head = text.get(..prefix.len())?;
     head.eq_ignore_ascii_case(prefix)
         .then(|| &text[prefix.len()..])
-}
-
-/// 从 `paths.node` 反推资源根。
-///
-/// `paths.node` 的形态随平台而变（Windows `<resources>/runtime/node/win32-x64/node.exe`、
-/// macOS `<resources>/runtime/node/darwin-arm64/bin/node`），**层数不同**，
-/// 因此不按层数硬编码，而是定位路径中的 **`runtime` 段**，取其父目录即 `<resources>`。
-fn resources_root(paths: &AppPaths) -> Option<&Path> {
-    let mut current = paths.node.as_path();
-    while let Some(parent) = current.parent() {
-        if parent.file_name().is_some_and(|name| name == "runtime") {
-            return parent.parent();
-        }
-        current = parent;
-    }
-    None
 }
 
 pub struct AppState {
@@ -100,9 +75,13 @@ impl AppState {
             None,
             None,
             Some(&format!(
-                "node={} dshEntry={} workspace={} dshHome={}",
-                redact_roots(&paths.node, &paths),
-                redact_roots(&paths.dsh_entry, &paths),
+                "runtime={} runtimeFormat={} workspace={} dshHome={}",
+                redact_roots(paths.runtime_launch.executable(), &paths),
+                if paths.runtime_launch.is_sea() {
+                    "enhanced-sea"
+                } else {
+                    "standard"
+                },
                 redact_roots(&paths.workspace, &paths),
                 redact_roots(&paths.dsh_home, &paths)
             )),
@@ -201,12 +180,11 @@ mod tests {
         (data, resources, paths)
     }
 
-    /// 资源根必须能从 `node` 路径反推出来——**且不得依赖层数**：
-    /// Windows 与 macOS 的 `runtime/node/<platform>/…` 层数不同。
+    /// 资源根由 `AppPaths` 显式保存，不能从会随 Runtime 格式改变的可执行路径反推。
     #[test]
-    fn resources_root_is_derived_from_the_runtime_segment() {
+    fn resources_root_is_stored_explicitly() {
         let (_data, resources, paths) = roots();
-        assert_eq!(resources_root(&paths), Some(resources.as_path()));
+        assert_eq!(paths.resources_root, resources);
     }
 
     /// 两个已知根都必须被替换为占位符：诊断包导出时**只识别标准用户目录前缀**，
@@ -215,15 +193,15 @@ mod tests {
     #[test]
     fn redacts_both_app_data_and_resources_roots() {
         let (_data, resources, paths) = roots();
-        let node = redact_roots(&paths.node, &paths);
+        let runtime = redact_roots(paths.runtime_launch.executable(), &paths);
         let workspace = redact_roots(&paths.workspace, &paths);
 
-        assert!(node.starts_with("<RESOURCES>/"), "实际为 {node}");
-        assert!(node.contains("/runtime/node/"), "实际为 {node}");
+        assert!(runtime.starts_with("<RESOURCES>/"), "实际为 {runtime}");
+        assert!(runtime.contains("/runtime/node/"), "实际为 {runtime}");
         assert!(workspace.starts_with("<APP_DATA>/"), "实际为 {workspace}");
 
         // 不得残留任一绝对根
-        for text in [&node, &workspace] {
+        for text in [&runtime, &workspace] {
             assert!(
                 !text.contains(&*resources.to_string_lossy()),
                 "泄漏资源根：{text}"
