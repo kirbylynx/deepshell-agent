@@ -458,7 +458,7 @@ DSH、Node、SEA packager/patch 或 First-party Plugin 任一变化都会使 Run
 >
 > `v0.1.4` preview release 已通过平台专用 Tauri 配置与验证规则实现并独立验证两条平台路线：macOS `.app` 只包含 `darwin-arm64` Node，Windows 安装树与 portable ZIP 只包含 `win32-x64` Node。Windows 真机验收与最终 macOS C0 回归均已登记在 `docs/releases/v0.1.4.zh.md`。macOS Developer ID 签名/公证与 Windows 代码签名仍是独立的正式分发门禁。
 >
-> 当前 `v0.1.5` 分支进一步以平台 SEA executable 替代上述 Standard Runtime 安装树（`REL-028`）。macOS 实现已通过自动化打包、真实浏览器 Ready Gate、性能、Cache、包体占用证据、由用户确认的 `MAC-01`～`MAC-09` 真机矩阵，以及最终 macOS review-fix-loop；clean commit 重建仍待执行。Windows 原生构建和真机验收尚未执行。本段是进行中的架构迁移记录，不代表已发布的跨平台结论。
+> 当前 `v0.1.5` 分支进一步以平台 SEA executable 替代上述 Standard Runtime 安装树（`REL-028`）。macOS 实现已通过自动化打包、真实浏览器 Ready Gate、性能、Cache、包体占用证据、由用户确认的 `MAC-01`～`MAC-09` 真机矩阵、最终 macOS review-fix-loop，以及基于已提交源码的非 provisional 重建。macOS 阶段已可移交 Windows；Windows 原生构建和真机验收尚未执行。本段是进行中的架构迁移记录，不代表已发布的跨平台结论。
 
 ### 9.3 原子更新与迁移
 

@@ -470,7 +470,7 @@ Package verification must compare E2E and Release artifacts to prove test-only c
 >
 > The `v0.1.4` preview release implements and independently validates both platform paths with platform-specific Tauri configuration and verification rules. The macOS `.app` contains only `darwin-arm64` Node; the Windows installed tree and portable ZIP contain only `win32-x64` Node. Windows on-device acceptance and the final macOS C0 regression are recorded in `docs/releases/v0.1.4.md`. Developer ID signing/notarization and Windows code signing remain separate formal-distribution gates.
 >
-> The active `v0.1.5` branch replaces that installed Standard Runtime tree with a platform SEA executable (`REL-028`). The macOS implementation has passed automated packaging, real-browser Ready Gate, performance, cache, package-footprint evidence, the user-confirmed `MAC-01` through `MAC-09` on-device matrix, and the final macOS review-fix-loop. A clean-commit rebuild remains pending. Windows native build and on-device acceptance remain unverified. This paragraph records an active architecture migration, not a published cross-platform result.
+> The active `v0.1.5` branch replaces that installed Standard Runtime tree with a platform SEA executable (`REL-028`). The macOS implementation has passed automated packaging, real-browser Ready Gate, performance, cache, package-footprint evidence, the user-confirmed `MAC-01` through `MAC-09` on-device matrix, the final macOS review-fix-loop, and a non-provisional rebuild from committed source. The macOS phase is ready for Windows handoff; Windows native build and on-device acceptance remain unverified. This paragraph records an active architecture migration, not a published cross-platform result.
 
 ### 9.4 Updates and migration
 
