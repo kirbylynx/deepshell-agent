@@ -14,6 +14,14 @@
 ;  14  = 无法证明当前安装目录未被受管进程占用
 ;  15  = 清理失败（含超时）
 
+!macro NSIS_HOOK_POSTINSTALL
+  ; v0.1.5 只携带 SEA Runtime。从 v0.1.4 升级时，安装目录会残留旧的标准
+  ; Node/DSH 树（27k+ 文件），既破坏文件数门槛也会让旧 Runtime 与新 SEA 共存。
+  ; 这里只删除精确的已知旧目录，不触碰 runtime/sea、profile-template 与用户数据。
+  RMDir /r "$INSTDIR\runtime\node"
+  RMDir /r "$INSTDIR\runtime\dsh"
+!macroend
+
 !macro NSIS_HOOK_PREUNINSTALL
   DetailPrint "DeepShell Agent: checking for leftover runtime processes..."
   ; 预置失败退出码并清零 error flag：ExecWait 在"子进程无法启动"（exe 缺失、被杀软

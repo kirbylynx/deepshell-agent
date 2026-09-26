@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "platform": "win32-x64",
+  "confirmedBy": "user",
+  "confirmedAt": "2026-09-23",
+  "exceptions": {
+    "performanceGates": ["warmRss"],
+    "sizeGates": ["windowsNsis"]
+  },
+  "rationale": {
+    "warmRss": "Windows 平台 Node SEA 的 raw asset archive（59.5 MB）以私有内存常驻；macOS 上同数据为 file-backed 且空闲后可回收，因此 macOS 仅 +8.3%。应用层无法消除该平台实现差异。实测 +51.9% / +101,850 KiB，超出 D-1508 的 +20%/+64 MiB。",
+    "windowsNsis": "SEA 内嵌的 Zstd archive 不可再压缩，而 v0.1.4 的 NSIS 对 node_modules 文本具有极高 LZMA 压缩率。实测 85,043,129 B，较 v0.1.4 的 56,777,588 B 增加 49.8%，超出 D-1507 的 +10% 上限；portable ZIP 仍为 -9.4%。"
+  },
+  "disclosure": [
+    "docs/releases/v0.1.5.md",
+    "docs/releases/v0.1.5.zh.md"
+  ]
+}

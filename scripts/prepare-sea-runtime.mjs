@@ -12,6 +12,7 @@ import {
   seaRuntimePaths,
   seaTarget,
   seedIsolatedSeaArchive,
+  stageRipgrepSidecar,
   stageSeaInput,
   verifyPackagerPatch,
   writeFileTransactionally,
@@ -39,6 +40,7 @@ if (JSON.stringify(lock.sea.transforms) !== JSON.stringify(compatibilityTransfor
 await Promise.all([
   copyFile(resolve(root, 'runtime/manifest/sea-entry.mjs'), resolve(inputRoot, 'sea-entry.mjs')),
   copyFile(resolve(root, 'runtime/manifest/sea-probe-worker.mjs'), resolve(inputRoot, 'sea-probe-worker.mjs')),
+  copyFile(resolve(root, 'runtime/manifest/sea-probe-argv.mjs'), resolve(inputRoot, 'sea-probe-argv.mjs')),
 ])
 const inventories = await generateSeaInventories(target, paths.directory, inputRoot)
 
@@ -57,6 +59,9 @@ const packageDocument = {
 }
 await writeFile(input, `${JSON.stringify(packageDocument, null, 2)}\n`)
 const packagerOutput = await runPackager({ lock, target, input, output: paths.executable, isolatedHome })
+// search 工具（glob/grep）在 packaged 模式下需要 `<executable>-rg[.exe]` sidecar
+// （native helper 无法从 pkg 的 VFS spawn）；从锁定 production tree 复制并记录摘要。
+const ripgrepSidecar = await stageRipgrepSidecar(target, paths.executable)
 if (await sha256(archive.path) !== archive.sha256) throw new Error('SEA 构建后 Node 基础归档摘要发生变化')
 const pkgManifest = JSON.parse(await readFile(resolve(root, 'node_modules/@yao-pkg/pkg/package.json'), 'utf8'))
 if (pkgManifest.version !== lock.sea.packager.version) throw new Error('实际 packager 版本与 runtime lock 不一致')
@@ -92,6 +97,7 @@ const receipt = {
     useSnapshot: lock.sea.useSnapshot,
   },
   packagerOutput: { asset: paths.executable.split('/').at(-1), ...packagerOutput, packagerOutputSha256: packagerOutput.sha256 },
+  ripgrepSidecar,
   inventories: {
     native: inventoryReceipt(inventories.native, 'native-addons.json'),
     scripts: inventoryReceipt(inventories.scripts, 'scripts-inventory.json'),

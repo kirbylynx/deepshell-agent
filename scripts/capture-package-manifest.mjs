@@ -107,13 +107,16 @@ function runtimePlatforms(resources) {
 
 function baselineFor(artifactKind) {
   const artifact = packageBaselineArtifact(baselineFixture, artifactKind)
+  // windows-portable 基线使用嵌套结构（archive/staging）；其余形态是扁平字段。
+  const artifactSha256 = artifact?.sha256 ?? artifact?.archive?.sha256
+  const treeContentSha256 = artifact?.contentSha256 ?? artifact?.staging?.contentSha256
   return {
     status: artifact?.status ?? 'pending',
     ...(artifact?.reason ? { reason: artifact.reason } : {}),
     canonicalSourceRef: baselineFixture.canonicalSource.tag,
     canonicalSourceCommit: baselineFixture.canonicalSource.peeledCommit,
-    ...(artifact?.sha256 ? { artifactSha256: artifact.sha256 } : {}),
-    ...(artifact?.contentSha256 ? { treeContentSha256: artifact.contentSha256 } : {}),
+    ...(artifactSha256 ? { artifactSha256 } : {}),
+    ...(treeContentSha256 ? { treeContentSha256 } : {}),
     baselineSourceInputSha256: baselineFixture.canonicalSource.baselineSourceInputSha256,
     algorithmVersion: baselineFixture.measurement.algorithm,
   }

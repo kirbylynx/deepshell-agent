@@ -386,17 +386,36 @@ pub fn cleanup_for_uninstall(
     self_pid: u32,
     deadline: Instant,
 ) -> Result<UninstallCleanup, AppError> {
-    let expected_node = install_root
-        .join("runtime")
-        .join("node")
-        .join("win32-x64")
-        .join("node.exe");
-    let expected_node = fs::canonicalize(&expected_node).map_err(|error| {
-        AppError::new(
-            ErrorCode::RuntimeStopFailed,
-            format!("无法解析安装目录内的 Node 路径：{error}"),
-        )
-    })?;
+    // v0.1.5 安装树的受管身份是 SEA executable；v0.1.4 升级场景还可能存在 legacy Node。
+    // 两个路径都允许缺失，但至少要能解析出一个受管身份，否则视为不可验证。
+    let expected_sea = fs::canonicalize(
+        install_root
+            .join("runtime")
+            .join("sea")
+            .join("win32-x64")
+            .join("deepshell-runtime.exe"),
+    )
+    .ok();
+    let expected_node = fs::canonicalize(
+        install_root
+            .join("runtime")
+            .join("node")
+            .join("win32-x64")
+            .join("node.exe"),
+    )
+    .ok();
+    let expected_executables: Vec<PathBuf> = [expected_sea, expected_node]
+        .into_iter()
+        .flatten()
+        .collect();
+    if expected_executables.is_empty() {
+        return Ok(UninstallCleanup::Unverifiable {
+            reason: format!(
+                "安装目录内既没有 SEA executable 也没有 legacy Node 路径：{}",
+                install_root.display()
+            ),
+        });
+    }
 
     // 1. 主程序仍在运行 → 交给卸载器提示用户先关闭应用。
     for main_name in ["deepshell-agent.exe", "DeepShell Agent.exe"] {
@@ -427,7 +446,7 @@ pub fn cleanup_for_uninstall(
         Ok(Some(mut record)) => {
             let record_target = fs::canonicalize(&record.expected_executable)
                 .ok()
-                .filter(|target| target == &expected_node);
+                .filter(|target| expected_executables.contains(target));
             if record_target.is_some() && record.state == RegistryState::Active {
                 match process_state(record.leader_pid) {
                     ProcessState::Dead => {
@@ -435,7 +454,10 @@ pub fn cleanup_for_uninstall(
                         unregister(&registry_path)?;
                     }
                     ProcessState::Alive => {
-                        match verify_executable_if_available(record.leader_pid, &expected_node) {
+                        match verify_executable_if_available_any(
+                            record.leader_pid,
+                            &expected_executables,
+                        ) {
                             ExecutableMatch::Matches => {
                                 terminate_pid_tree(record.leader_pid, None, deadline, None)?;
                                 terminated.push(record.leader_pid);
@@ -477,33 +499,35 @@ pub fn cleanup_for_uninstall(
     }
 
     // 3. 精确路径枚举兜底：只清理可执行路径与身份都可验证的受管进程。
-    let remaining = match enumerate_pids_by_executable(&expected_node, self_pid) {
-        Ok(pids) => pids,
-        Err(error) => {
-            let reason = format!(
-                "无法枚举受管 Sidecar 进程：{error}（请检查 PowerShell 是否可用/被策略禁用）"
-            );
-            return Ok(UninstallCleanup::Unverifiable { reason });
-        }
-    };
-    for pid in remaining {
-        if terminated.contains(&pid) {
-            continue;
-        }
-        match verify_executable_if_available(pid, &expected_node) {
-            ExecutableMatch::Matches => {
-                terminate_pid_tree(pid, None, deadline, None)?;
-                terminated.push(pid);
+    for expected in &expected_executables {
+        let remaining = match enumerate_pids_by_executable(expected, self_pid) {
+            Ok(pids) => pids,
+            Err(error) => {
+                let reason = format!(
+                    "无法枚举受管 Sidecar 进程：{error}（请检查 PowerShell 是否可用/被策略禁用）"
+                );
+                return Ok(UninstallCleanup::Unverifiable { reason });
             }
-            ExecutableMatch::Mismatch => {
-                // 枚举与校验之间 PID 已易主：跳过，不是我们的进程。
+        };
+        for pid in remaining {
+            if terminated.contains(&pid) {
+                continue;
             }
-            ExecutableMatch::Unavailable => {
-                return Ok(UninstallCleanup::Unverifiable {
-                    reason: format!(
-                        "无法校验受管进程 {pid} 的身份（请检查 PowerShell 是否可用/被策略禁用）"
-                    ),
-                });
+            match verify_executable_if_available_any(pid, &expected_executables) {
+                ExecutableMatch::Matches => {
+                    terminate_pid_tree(pid, None, deadline, None)?;
+                    terminated.push(pid);
+                }
+                ExecutableMatch::Mismatch => {
+                    // 枚举与校验之间 PID 已易主：跳过，不是我们的进程。
+                }
+                ExecutableMatch::Unavailable => {
+                    return Ok(UninstallCleanup::Unverifiable {
+                        reason: format!(
+                            "无法校验受管进程 {pid} 的身份（请检查 PowerShell 是否可用/被策略禁用）"
+                        ),
+                    });
+                }
             }
         }
     }
@@ -676,6 +700,23 @@ fn verify_executable_if_available(pid: u32, expected: &Path) -> ExecutableMatch 
     };
     if actual == expected {
         ExecutableMatch::Matches
+    } else {
+        ExecutableMatch::Mismatch
+    }
+}
+
+/// 对任一受管身份路径校验成功即视为匹配；全部不可用才返回 Unavailable。
+fn verify_executable_if_available_any(pid: u32, expected: &[PathBuf]) -> ExecutableMatch {
+    let mut unavailable = false;
+    for path in expected {
+        match verify_executable_if_available(pid, path) {
+            ExecutableMatch::Matches => return ExecutableMatch::Matches,
+            ExecutableMatch::Mismatch => {}
+            ExecutableMatch::Unavailable => unavailable = true,
+        }
+    }
+    if unavailable {
+        ExecutableMatch::Unavailable
     } else {
         ExecutableMatch::Mismatch
     }
@@ -892,6 +933,42 @@ mod tests {
         let node = node_directory.join("node.exe");
         fs::copy(bundled_node(), &node).unwrap();
         node
+    }
+
+    /// 构造只含 SEA executable 的 v0.1.5 安装布局（无 legacy Node）。
+    fn make_sea_install_layout(root: &Path) -> PathBuf {
+        let sea_directory = root.join("runtime").join("sea").join("win32-x64");
+        fs::create_dir_all(&sea_directory).unwrap();
+        let sea = sea_directory.join("deepshell-runtime.exe");
+        fs::write(&sea, b"stub").unwrap();
+        sea
+    }
+
+    #[test]
+    fn cleanup_accepts_sea_only_install_layout() {
+        // v0.1.5 安装树只有 SEA executable（无 legacy Node）：维护命令必须返回 Clean，
+        // 不得因缺失 Node 路径而失败关闭（否则 NSIS 卸载 hook 会 Abort）。
+        let install = project_volume_tempdir();
+        make_sea_install_layout(install.path());
+        let app_data = project_volume_tempdir();
+        fs::create_dir_all(app_data.path().join("runtime-state")).unwrap();
+
+        let outcome = cleanup_for_uninstall(
+            install.path(),
+            app_data.path(),
+            std::process::id(),
+            Instant::now() + Duration::from_secs(10),
+        )
+        .unwrap();
+
+        match outcome {
+            UninstallCleanup::Clean { terminated } => {
+                assert!(terminated.is_empty(), "无受管进程时不得终止任何进程")
+            }
+            UninstallCleanup::AppRunning { .. } | UninstallCleanup::Unverifiable { .. } => {
+                panic!("SEA-only 安装树必须返回 Clean，得到其它结果")
+            }
+        }
     }
 
     /// 在项目所在卷上创建临时目录（减少与项目文件的跨卷差异）。

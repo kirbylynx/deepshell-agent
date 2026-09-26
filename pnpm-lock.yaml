@@ -14,7 +14,7 @@ patchedDependencies:
     hash: 218efdf63541195b7c94e4fd84fe9e0d02d847ec924d4674d5678da905a04f4b
     path: patches/@deepseek-ai__dsh-client-modules@0.1.5-rc.2.patch
   '@yao-pkg/pkg@6.22.0':
-    hash: feaa0f29693f9c7b9ce3e8b430412f5c597149c96c8149c27b09be64eb5db78c
+    hash: 34295ed217a55fc962dda1c12ef756f84d94cd1afd739613b4d43ebee7b75e52
     path: patches/@yao-pkg__pkg@6.22.0.patch
 
 importers:
@@ -60,7 +60,7 @@ importers:
         version: 9.31.2
       '@yao-pkg/pkg':
         specifier: 6.22.0
-        version: 6.22.0(patch_hash=feaa0f29693f9c7b9ce3e8b430412f5c597149c96c8149c27b09be64eb5db78c)
+        version: 6.22.0(patch_hash=34295ed217a55fc962dda1c12ef756f84d94cd1afd739613b4d43ebee7b75e52)
       ajv:
         specifier: 8.20.0
         version: 8.20.0
@@ -9657,7 +9657,7 @@ snapshots:
       - bare-buffer
       - react-native-b4a
 
-  '@yao-pkg/pkg@6.22.0(patch_hash=feaa0f29693f9c7b9ce3e8b430412f5c597149c96c8149c27b09be64eb5db78c)':
+  '@yao-pkg/pkg@6.22.0(patch_hash=34295ed217a55fc962dda1c12ef756f84d94cd1afd739613b4d43ebee7b75e52)':
     dependencies:
       '@babel/generator': 7.29.8
       '@babel/parser': 7.29.9

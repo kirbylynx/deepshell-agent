@@ -30,7 +30,7 @@ function combinedPackageReport(version: string, shas: {
     schemaVersion: 3,
     application: { name: 'DeepShell Agent', version },
     runtime,
-    runtimeAcceptance: { status: 'present', passed: true },
+    runtimeAcceptance: { status: 'present', passed: true, gateExceptions: [] },
     firstRunFootprint: { status: 'present', total: { files: 100, bytes: 1_000, allocatedBytes: 2_000 } },
     assets: {
       app: { status: 'present' },

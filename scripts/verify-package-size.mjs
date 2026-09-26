@@ -14,6 +14,16 @@ async function readJson(path) {
   return JSON.parse(await readFile(path, 'utf8'))
 }
 
+// 可选读取：门槛例外声明文件不存在时返回 null（无例外 = 全部门槛照常阻断）。
+async function optionalJson(path) {
+  try {
+    return JSON.parse(await readFile(path, 'utf8'))
+  } catch (error) {
+    if (error?.code === 'ENOENT') return null
+    throw error
+  }
+}
+
 function inspection(manifest, subject, inspectionMode) {
   const value = manifest.inspections?.find(item => item.subject === subject)
   if (!value) throw new Error(`${manifest.artifactKind} 清单缺少 ${subject} inspection`)
@@ -155,6 +165,10 @@ if (process.platform === 'darwin') {
     throw new Error(`Windows 产物检测到异平台 Runtime：${[...foreignRuntimePaths].sort().join(', ')}`)
   }
 
+  // 体积门槛例外：只有显式声明（windows-gate-exceptions.json）且经用户确认的项才可
+  // 跳过"严格下降"检查；未声明的超标仍然阻断。
+  const gateExceptionDocument = await optionalJson(resolve(root, 'runtime/manifest/windows-gate-exceptions.json'))
+  const sizeExceptions = gateExceptionDocument?.exceptions?.sizeGates ?? []
   const result = {
     ok: true,
     platform: 'win32-x64',
@@ -163,11 +177,18 @@ if (process.platform === 'darwin') {
       baseline.artifacts.windowsInstalledTree,
       'Windows installed tree',
     ),
-    windowsNsis: verifyReducedFile(
-      { status: nsis.status, ...nsis.size },
-      baseline.artifacts.windowsNsis,
-      'Windows NSIS',
-    ),
+    windowsNsis: sizeExceptions.includes('windowsNsis')
+      ? {
+          status: nsis.status,
+          ...nsis.size,
+          exception: 'declared',
+          baseline: { bytes: baseline.artifacts.windowsNsis.bytes },
+        }
+      : verifyReducedFile(
+          { status: nsis.status, ...nsis.size },
+          baseline.artifacts.windowsNsis,
+          'Windows NSIS',
+        ),
     windowsPortable: {
       status: 'recorded-first-version',
       staging: { bytes: portableStaging.size.bytes, files: portableStaging.size.files, contentSha256: portableStaging.contentSha256 },

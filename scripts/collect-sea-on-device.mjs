@@ -63,11 +63,13 @@ async function requireRealPath(path, expectedType) {
 
 function metrics(files) {
   const allocated = files.map(file => file.allocatedBytes)
-  if (allocated.some(value => value === null)) throw new Error('当前平台无法取得 Cache allocated bytes')
+  const available = allocated.every(value => value !== null)
   return {
     files: files.length,
     bytes: files.reduce((sum, file) => sum + file.bytes, 0),
-    allocatedBytes: allocated.reduce((sum, value) => sum + value, 0),
+    // Windows 的 stat 不提供磁盘分配块数：按 D-1507 标为 unavailable 并记录原因，不伪装为 0。
+    allocatedBytes: available ? allocated.reduce((sum, value) => sum + value, 0) : null,
+    allocatedBytesUnavailableReason: available ? null : '当前平台 stat 不提供磁盘分配块数（Windows）',
   }
 }
 
@@ -85,10 +87,12 @@ const appData = argValue(
 )
 if (!appData) throw new Error('无法解析应用数据目录，请显式传入 --app-data')
 const platformRoot = resolve(appData, 'runtime-cache/native', target)
-const generation = resolve(platformRoot, executableSha256)
+// generation 目录名 = 完整 SEA SHA256 的前 16 位（Windows MAX_PATH 约束，见 runtime_cache.rs）。
+const generationName = executableSha256.slice(0, 16)
+const generation = resolve(platformRoot, generationName)
 const pkgNative = resolve(generation, 'pkg-native')
 const manifestPath = resolve(generation, 'deepshell-cache-manifest.json')
-const lockPath = resolve(platformRoot, `${executableSha256}.lock`)
+const lockPath = resolve(platformRoot, `${generationName}.lock`)
 await Promise.all([
   requireRealPath(platformRoot, 'directory'),
   requireRealPath(generation, 'directory'),

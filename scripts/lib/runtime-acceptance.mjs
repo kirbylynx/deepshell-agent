@@ -53,7 +53,7 @@ function verifyGate(gate, baseline, candidate, percentLimit, absoluteLimit, unit
   }
 }
 
-export function summarizeRuntimeAcceptance(evidence, expected, onDevice) {
+export function summarizeRuntimeAcceptance(evidence, expected, onDevice, gateExceptions = []) {
   if (evidence.target !== expected.target) {
     throw new Error(`Runtime acceptance target 不匹配：expected ${expected.target}, got ${evidence.target}`)
   }
@@ -105,8 +105,14 @@ export function summarizeRuntimeAcceptance(evidence, expected, onDevice) {
     64,
     1_024,
   )
-  if (!evidence.passed || !Object.values(evidence.gates).every(gate => gate.passed)) {
-    throw new Error('Runtime acceptance 性能或内存门槛未通过')
+  // 门槛例外：只有显式声明（runtime/manifest/windows-gate-exceptions.json）且经用户
+  // 确认的失败项才可放行；任何未声明的失败项仍然阻断。
+  const failedGates = Object.entries(evidence.gates)
+    .filter(([, gate]) => !gate.passed)
+    .map(([name]) => name)
+  const unexceptedGates = failedGates.filter(name => !gateExceptions.includes(name))
+  if (unexceptedGates.length > 0) {
+    throw new Error(`Runtime acceptance 性能或内存门槛未通过（未声明例外：${unexceptedGates.join(', ')}）`)
   }
 
   const firstCache = stableMetrics(evidence.groups.seaFirstCache.samples, 'cache', '首次 Cache 指标')
@@ -176,5 +182,6 @@ export function summarizeRuntimeAcceptance(evidence, expected, onDevice) {
     freshAppData: evidence.groups.seaFreshAppData,
     nativeProbes,
     passed: true,
+    gateExceptions: failedGates,
   }
 }

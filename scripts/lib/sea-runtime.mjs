@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
-import { copyFile, cp, lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, chmod, cp, lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, extname, relative, resolve, sep } from 'node:path'
 import { promisify } from 'node:util'
 import { nodeArchivePath, root, sha256, targetLock } from './runtime.mjs'
@@ -111,7 +111,10 @@ export function isForeignTargetPath(target, path) {
   }
   const platformPackage = normalized.match(/\/node_modules\/(?:@img\/(?:sharp-libvips|sharp)-|@koromix\/koffi-|@deepseek-ai\/node-addon-system-|@vscode\/ripgrep-|node-addon-require-builtin-)([^/]+)\//i)?.[1]
   if (!platformPackage) return false
-  return platformPackage !== (target === 'darwin-arm64' ? 'darwin-arm64' : 'win32-x64')
+  // Windows 平台包名可能带工具链后缀（例如 node-addon-require-builtin-win32-x64-msvc），
+  // 归一化后比较，避免把本平台包误判为 foreign。
+  const normalizedPackage = platformPackage.replace(/-(?:msvc|gnu|musl)$/i, '')
+  return normalizedPackage !== (target === 'darwin-arm64' ? 'darwin-arm64' : 'win32-x64')
 }
 
 function isForeignNative(target, path) {
@@ -162,6 +165,9 @@ export async function verifyPackagerPatch(lock) {
     ['prelude/sea-bootstrap.bundle.js', 'var workerFilename = filename;'],
     ['dictionary/node-pty.js', 'process.pkgNativePath ? process.pkgNativePath'],
     ['lib-es5/sea.js', "main: 'sea-main.js'"],
+    // Windows sharp 平台包自包含 libvips，不得要求 @img/sharp-libvips-win32-x64 sibling。
+    ['prelude/bootstrap-shared.js', "'@img/sharp-win32-x64': []"],
+    ['prelude/sea-bootstrap.bundle.js', '"@img/sharp-win32-x64": []'],
   ]
   for (const [path, marker] of checks) {
     const content = await readFile(resolve(root, 'node_modules/@yao-pkg/pkg', path), 'utf8')
@@ -223,9 +229,28 @@ export async function seedIsolatedSeaArchive(lock, target, isolatedHome) {
   return { basename: expectedBasename, bytes: sourceInfo.size, sha256: copiedSha256, path: destination }
 }
 
+/// search 工具（glob/grep）在 packaged 模式下使用 `<executable>-rg[.exe]` sidecar：
+/// native helper 无法从 pkg 的 VFS spawn。这里从锁定 production tree 复制本平台
+/// ripgrep 到 SEA 目录并设为可执行，摘要进入 build receipt。
+export async function stageRipgrepSidecar(target, executablePath) {
+  const platform = target === 'win32-x64' ? 'win32-x64' : 'darwin-arm64'
+  const sourceName = target === 'win32-x64' ? 'rg.exe' : 'rg'
+  const source = resolve(root, 'runtime/dsh/node_modules', `@vscode/ripgrep-${platform}`, 'bin', sourceName)
+  const directory = resolve(executablePath, '..')
+  const baseName = basename(executablePath).replace(/\.exe$/i, '')
+  const sidecar = target === 'win32-x64'
+    ? resolve(directory, `${baseName}-rg.exe`)
+    : `${executablePath}-rg`
+  await copyFile(source, sidecar)
+  if (target !== 'win32-x64') await chmod(sidecar, 0o755)
+  return { file: basename(sidecar), bytes: (await stat(sidecar)).size, sha256: await sha256(sidecar) }
+}
+
 export async function runPackager({ lock, target, input, output, isolatedHome }) {
   const cli = resolve(root, 'node_modules/@yao-pkg/pkg/lib-es5/bin.js')
-  const temporaryOutput = `${output}.tmp-${process.pid}`
+  // 锁定 packager 对 Windows target 会给输出名自动追加 `.exe`（lib-es5/config.js
+  // assignTargetOutputs）；临时输出名必须预先带 `.exe`，才能与 packager 实际写出的文件一致。
+  const temporaryOutput = `${output}.tmp-${process.pid}${target === 'win32-x64' ? '.exe' : ''}`
   await rm(temporaryOutput, { force: true })
   const env = { ...process.env, HOME: isolatedHome }
   for (const key of ['CHDIR', 'PKG_EXECPATH', 'PKG_NATIVE_CACHE_PATH', 'NODE_OPTIONS', 'NODE_PATH']) delete env[key]

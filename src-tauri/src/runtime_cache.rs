@@ -91,7 +91,8 @@ pub fn acquire(paths: &AppPaths) -> Result<Option<NativeCacheLease>, AppError> {
     private_directory(&platform_root)?;
     reject_symlink(&platform_root)?;
 
-    let lock_path = platform_root.join(format!("{sea_sha256}.lock"));
+    let generation_name = generation_directory_name(sea_sha256);
+    let lock_path = platform_root.join(format!("{generation_name}.lock"));
     let lock = OpenOptions::new()
         .read(true)
         .write(true)
@@ -111,7 +112,7 @@ pub fn acquire(paths: &AppPaths) -> Result<Option<NativeCacheLease>, AppError> {
         Err(error) => return Err(cache_error(error)),
     }
 
-    let generation_root = platform_root.join(sea_sha256);
+    let generation_root = platform_root.join(generation_name);
     prepare_generation(&generation_root, &platform, sea_sha256)?;
     let pkg_native = generation_root.join("pkg-native");
     private_directory(&pkg_native)?;
@@ -216,6 +217,7 @@ fn cleanup_old_generations(current: &Path, platform: &str, current_sha256: &str)
     };
     let mut failures = 0;
     let mut candidates = Vec::new();
+    let current_name = generation_directory_name(current_sha256).to_owned();
     for entry in entries {
         let entry = match entry {
             Ok(entry) => entry,
@@ -227,27 +229,32 @@ fn cleanup_old_generations(current: &Path, platform: &str, current_sha256: &str)
         let Some(name) = entry.file_name().to_str().map(str::to_owned) else {
             continue;
         };
-        if name == current_sha256 || !is_sha256(&name) {
+        // generation 目录名是完整 SHA256 的前 16 位；跳过当前目录与非 generation 名。
+        if name == current_name || !is_generation_directory_name(&name) {
             continue;
         }
         match fs::symlink_metadata(entry.path()) {
             Ok(metadata) if metadata.is_dir() && !is_link_or_reparse(&metadata) => {}
             _ => continue,
         }
-        match generation_is_valid(&entry.path(), platform, &name) {
-            Ok(true) => {
-                let modified = fs::metadata(entry.path().join(CACHE_MANIFEST))
-                    .and_then(|value| value.modified())
-                    .unwrap_or(SystemTime::UNIX_EPOCH);
-                candidates.push((modified, name, entry.path()));
-            }
-            Ok(false) => {}
+        match generation_sha256_for_directory(&entry.path(), platform) {
+            Ok(Some(sha256)) => match generation_is_valid(&entry.path(), platform, &sha256) {
+                Ok(true) => {
+                    let modified = fs::metadata(entry.path().join(CACHE_MANIFEST))
+                        .and_then(|value| value.modified())
+                        .unwrap_or(SystemTime::UNIX_EPOCH);
+                    candidates.push((modified, name, entry.path()));
+                }
+                Ok(false) => {}
+                Err(_) => failures += 1,
+            },
+            Ok(None) => {}
             Err(_) => failures += 1,
         }
     }
     candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
-    for (_, sha256, generation) in candidates.into_iter().skip(1) {
-        let lock_path = platform_root.join(format!("{sha256}.lock"));
+    for (_, name, generation) in candidates.into_iter().skip(1) {
+        let lock_path = platform_root.join(format!("{name}.lock"));
         let lock = match OpenOptions::new().read(true).write(true).open(&lock_path) {
             Ok(lock) => lock,
             Err(_) => {
@@ -267,8 +274,12 @@ fn cleanup_old_generations(current: &Path, platform: &str, current_sha256: &str)
                     .map(|metadata| metadata.is_dir() && !is_link_or_reparse(&metadata))
                     .unwrap_or(false)
                     && matches!(
-                        generation_is_valid(&generation, platform, &sha256),
-                        Ok(true)
+                        generation_sha256_for_directory(&generation, platform),
+                        Ok(Some(sha256))
+                            if matches!(
+                                generation_is_valid(&generation, platform, &sha256),
+                                Ok(true)
+                            )
                     );
                 if !still_owned || fs::remove_dir_all(generation).is_err() {
                     failures += 1;
@@ -421,7 +432,7 @@ fn is_link_or_reparse(metadata: &fs::Metadata) -> bool {
     {
         use std::os::windows::fs::MetadataExt;
         const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
-        return metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0;
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
     }
     #[cfg(not(windows))]
     false
@@ -432,6 +443,57 @@ fn is_sha256(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// generation 目录名 = 完整 SEA SHA256 的前 16 位十六进制字符。
+/// Windows 的 MAX_PATH 限制下，完整 64 字符会使 pkg 物化出的 native 路径超过 260 字符
+/// （sharp/koffi 的 dlopen 会以“文件名或扩展名太长”失败）；manifest 内仍保存完整
+/// SHA256，目录名只作为 generation 标识。
+fn generation_directory_name(sea_sha256: &str) -> &str {
+    sea_sha256.get(..16).unwrap_or(sea_sha256)
+}
+
+fn is_generation_directory_name(value: &str) -> bool {
+    value.len() == 16
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// 读取 generation 目录内 manifest 的完整 SEA SHA256；目录名必须等于其前 16 位。
+fn generation_sha256_for_directory(
+    root: &Path,
+    platform: &str,
+) -> Result<Option<String>, AppError> {
+    let Some(name) = root.file_name().and_then(|value| value.to_str()) else {
+        return Ok(None);
+    };
+    if !is_generation_directory_name(name) {
+        return Ok(None);
+    }
+    let manifest_path = root.join(CACHE_MANIFEST);
+    let metadata = match fs::symlink_metadata(&manifest_path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(cache_error(error)),
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() || metadata.len() > 1_048_576 {
+        return Ok(None);
+    }
+    let manifest = match fs::read(&manifest_path)
+        .map_err(cache_error)
+        .and_then(|bytes| serde_json::from_slice::<CacheManifest>(&bytes).map_err(json_error))
+    {
+        Ok(manifest) => manifest,
+        Err(_) => return Ok(None),
+    };
+    if manifest.platform != platform
+        || !is_sha256(&manifest.sea_sha256)
+        || generation_directory_name(&manifest.sea_sha256) != name
+    {
+        return Ok(None);
+    }
+    Ok(Some(manifest.sea_sha256))
 }
 
 fn runtime_platform() -> &'static str {
@@ -462,9 +524,10 @@ mod tests {
         let resources = root.join("resources");
         let data = root.join("data");
         let mut paths = AppPaths::new(data, resources.clone()).unwrap();
+        let platform = runtime_platform();
         paths.runtime_launch = RuntimeLaunch::Sea {
-            executable: resources.join("runtime/sea/darwin-arm64/deepshell-runtime"),
-            manifest: resources.join("runtime/sea/darwin-arm64/sea-runtime-manifest.json"),
+            executable: resources.join(format!("runtime/sea/{platform}/deepshell-runtime")),
+            manifest: resources.join(format!("runtime/sea/{platform}/sea-runtime-manifest.json")),
             sha256: "a".repeat(64),
         };
         paths
@@ -489,8 +552,8 @@ mod tests {
         fs::write(
             paths
                 .native_cache_root
-                .join("darwin-arm64")
-                .join("a".repeat(64))
+                .join(runtime_platform())
+                .join("a".repeat(16))
                 .join("pkg-native/addon.node"),
             b"corrupt",
         )
@@ -508,12 +571,14 @@ mod tests {
         let shas = ["a".repeat(64), "b".repeat(64), "c".repeat(64)];
         for sha256 in &shas {
             paths.runtime_launch = RuntimeLaunch::Sea {
-                executable: paths
-                    .resources_root
-                    .join("runtime/sea/darwin-arm64/deepshell-runtime"),
-                manifest: paths
-                    .resources_root
-                    .join("runtime/sea/darwin-arm64/sea-runtime-manifest.json"),
+                executable: paths.resources_root.join(format!(
+                    "runtime/sea/{}/deepshell-runtime",
+                    runtime_platform()
+                )),
+                manifest: paths.resources_root.join(format!(
+                    "runtime/sea/{}/sea-runtime-manifest.json",
+                    runtime_platform()
+                )),
                 sha256: sha256.clone(),
             };
             let mut lease = acquire(&paths).unwrap().unwrap();
@@ -522,10 +587,31 @@ mod tests {
             drop(lease);
             thread::sleep(Duration::from_millis(10));
         }
-        let root = paths.native_cache_root.join("darwin-arm64");
-        assert!(!root.join(&shas[0]).exists());
-        assert!(root.join(&shas[1]).is_dir());
-        assert!(root.join(&shas[2]).is_dir());
+        let root = paths.native_cache_root.join(runtime_platform());
+        // generation 目录名是完整 SEA SHA256 的前 16 位。
+        let directory_name = |sha256: &str| sha256[..16].to_owned();
+        assert!(!root.join(directory_name(&shas[0])).exists());
+        assert!(root.join(directory_name(&shas[1])).is_dir());
+        assert!(root.join(directory_name(&shas[2])).is_dir());
+    }
+
+    #[test]
+    fn generation_directory_name_keeps_windows_paths_within_max_path() {
+        // W2-F001 回归保护：generation 目录必须使用 SHA256 前缀，否则 pkg 物化的
+        // native 路径在 Windows 上会超过 MAX_PATH（260），sharp/koffi 的 dlopen 失败。
+        let long_sha = "27698d7c953e0b6c6d3b0c906ecc62822ab7e6072d97d6d38a01f4342e1882d9";
+        let directory = generation_directory_name(long_sha);
+        assert_eq!(directory.len(), 16);
+        assert!(is_generation_directory_name(directory));
+        // 最坏 app-data 前缀（长用户名）+ 实际 pkg 物化后缀。
+        let prefix = r"C:\Users\verylongusername\AppData\Roaming\com.deepshell.agent\runtime-cache\native\win32-x64";
+        let suffix = r"\pkg-native\pkg\0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\@img\sharp-win32-x64\lib\sharp-win32-x64-0.35.4.node";
+        let full = format!("{prefix}\\{directory}{suffix}");
+        assert!(
+            full.len() < 260,
+            "generation 路径长度 {} 必须小于 260",
+            full.len()
+        );
     }
 
     #[test]

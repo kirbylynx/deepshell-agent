@@ -15,6 +15,15 @@ const paths = seaRuntimePaths(target)
 const execFileAsync = promisify(execFile)
 await Promise.all(Object.values(paths).map(path => access(path)))
 const receipt = await readSeaReceipt(paths.receipt)
+// search 工具（glob/grep）的 ripgrep sidecar：存在 + 摘要与 build receipt 一致。
+const ripgrepSidecarPath = target === 'win32-x64'
+  ? resolve(paths.executable, '..', 'deepshell-runtime-rg.exe')
+  : `${paths.executable}-rg`
+await access(ripgrepSidecarPath)
+if (receipt.ripgrepSidecar?.sha256 !== await sha256(ripgrepSidecarPath)
+  || receipt.ripgrepSidecar?.bytes !== (await stat(ripgrepSidecarPath)).size) {
+  throw new Error('SEA ripgrep sidecar 与 build receipt 不一致')
+}
 const runtimeManifest = JSON.parse(await readFile(paths.runtimeManifest, 'utf8'))
 for (const [name, value, schemaFile] of [
   ['build receipt', receipt, 'sea-build-receipt.schema.json'],
@@ -87,5 +96,29 @@ const sessionWorkerProbe = JSON.parse((await execFileAsync(paths.executable, ['-
 })).stdout.trim())
 if (sessionWorkerProbe.ok !== true || sessionWorkerProbe.packaged !== true) {
   throw new Error(`SEA DSH Session Worker probe 失败：${JSON.stringify(sessionWorkerProbe)}`)
+}
+
+// 自 spawn 分流：pkg child_process 注入 PKG_EXECPATH 与 Windows 原生 CreateProcess
+// （无标记）两条路径都必须把 argv[2] 的脚本参数按 Node 约定传给脚本，否则内部脚本
+// 会落入 DSH CLI 并报 `--profile` 缺失。
+const selfSpawnProbe = JSON.parse((await execFileAsync(paths.executable, ['--deepshell-sea-probe', 'self-spawn-shapes'], {
+  timeout: 60_000,
+  maxBuffer: 2 * 1024 * 1024,
+})).stdout.trim())
+if (selfSpawnProbe.ok !== true) {
+  throw new Error(`SEA self-spawn 分流 probe 失败：${JSON.stringify(selfSpawnProbe)}`)
+}
+
+// Windows 沙箱链（pwsh 工具真实形态）：subprocess Job runner → 原生 CreateProcess →
+// windows-acl runner → 受限令牌子进程。read-only 形态不写 ACL，任意用户会话可执行。
+if (target === 'win32-x64') {
+  const chainProbe = JSON.parse((await execFileAsync(paths.executable, ['--deepshell-sea-probe', 'subprocess-chain'], {
+    timeout: 120_000,
+    maxBuffer: 4 * 1024 * 1024,
+  })).stdout.trim())
+  const sandbox = chainProbe?.results?.chain?.['sandbox-acl']
+  if (sandbox?.outcome?.exitCode !== 0 || !String(sandbox?.stdout ?? '').includes('sandbox-chain-ok')) {
+    throw new Error(`SEA 沙箱链路 probe 失败：${JSON.stringify(sandbox ?? chainProbe)}`)
+  }
 }
 console.log(JSON.stringify({ ok: true, target, sha256: executableSha256, provisional: receipt.provisional }))

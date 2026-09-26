@@ -164,6 +164,11 @@ function validateCombinedPackageReport(report, assets) {
   if (report?.schemaVersion !== 3) {
     throw new Error('combined release staging 要求 schemaVersion=3 的 package report')
   }
+  // 门槛例外（D-1507/D-1508）：report 必须显式记录 gateExceptions 数组（无例外时为空），
+  // 使任何被放行的失败项都可从 report 审计；例外本身不阻断 combined staging。
+  if (!Array.isArray(report.runtimeAcceptance?.gateExceptions)) {
+    throw new Error('combined release staging 要求 package report 记录 gateExceptions 数组')
+  }
   if (report.runtime?.provisional !== false || report.runtimeAcceptance?.status !== 'present' ||
       report.runtimeAcceptance?.passed !== true) {
     throw new Error('combined release staging 要求非 provisional Runtime 和已通过的 Runtime acceptance')

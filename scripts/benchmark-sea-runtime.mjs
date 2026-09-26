@@ -11,7 +11,6 @@ import { seaRuntimePaths } from './lib/sea-runtime.mjs'
 const execFileAsync = promisify(execFile)
 const lock = await readLock()
 const target = currentRuntimePlatform()
-if (target !== 'darwin-arm64') throw new Error('当前 benchmark 只在 macOS arm64 阶段执行；Windows 必须在真机实现同口径采样')
 
 function argumentNumber(name, fallback) {
   const index = process.argv.indexOf(name)
@@ -27,8 +26,23 @@ const idleSeconds = argumentNumber('--idle-seconds', 30)
 if (runs < 1) throw new Error('--runs 必须至少为 1')
 if (freshRuns < 1) throw new Error('--fresh-runs 必须至少为 1')
 
-const browser = process.env.DEEPSHELL_BENCH_BROWSER
-  ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+// 平台默认 Chromium 候选：macOS 用 Chrome；Windows 用 Chrome 或 Edge（均为 Chromium 内核，支持 CDP）。
+function defaultBrowserCandidates() {
+  if (process.platform !== 'win32') return ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome']
+  const bases = [process.env['PROGRAMFILES'], process.env['PROGRAMFILES(X86)'], process.env['LOCALAPPDATA']].filter(Boolean)
+  return bases.flatMap(base => [
+    resolve(base, 'Google/Chrome/Application/chrome.exe'),
+    resolve(base, 'Microsoft/Edge/Application/msedge.exe'),
+  ])
+}
+async function resolveDefaultBrowser() {
+  const candidates = defaultBrowserCandidates()
+  for (const candidate of candidates) {
+    try { await stat(candidate); return candidate } catch {}
+  }
+  return candidates[0]
+}
+const browser = process.env.DEEPSHELL_BENCH_BROWSER ?? await resolveDefaultBrowser()
 await stat(browser).catch(() => {
   throw new Error(`缺少 benchmark 浏览器：${browser}；可通过 DEEPSHELL_BENCH_BROWSER 指定 Chromium`)
 })
@@ -53,6 +67,13 @@ const activeChildren = new Set()
 async function stopProcess(child) {
   if (!child) return
   if (child.exitCode !== null) {
+    activeChildren.delete(child)
+    return
+  }
+  if (process.platform === 'win32') {
+    // Windows 没有 POSIX 进程组信号；用 taskkill /T 终止整棵进程树。
+    try { spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }) } catch {}
+    await sleep(500)
     activeChildren.delete(child)
     return
   }
@@ -139,6 +160,7 @@ async function treeMetrics(path) {
   let files = 0
   let bytes = 0
   let allocatedBytes = 0
+  let allocatedAvailable = true
   async function visit(current) {
     const entries = await readdir(current, { withFileTypes: true })
     for (const entry of entries) {
@@ -149,16 +171,41 @@ async function treeMetrics(path) {
         files += 1
         bytes += Number(metadata.size)
         if (typeof metadata.blocks === 'bigint') allocatedBytes += Number(metadata.blocks * 512n)
+        else allocatedAvailable = false
       }
     }
   }
   await visit(path).catch(error => {
     if (error?.code !== 'ENOENT') throw error
   })
-  return { files, bytes, allocatedBytes }
+  // Windows 的 stat 不提供 blocks；按 D-1507 标为不可用而不是伪装为 0。
+  return { files, bytes, allocatedBytes: allocatedAvailable ? allocatedBytes : null }
 }
 
 async function processTreeRssKiB(rootPid) {
+  // 口径统一为受管 Runtime 进程树的常驻内存 KiB：macOS 用 ps rss，Windows 用 CIM WorkingSetSize。
+  if (process.platform === 'win32') {
+    const { stdout } = await execFileAsync('powershell.exe', [
+      '-NoProfile', '-NonInteractive', '-Command',
+      'Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,WorkingSetSize | ConvertTo-Csv -NoTypeInformation',
+    ], { maxBuffer: 32 * 1024 * 1024, timeout: 60_000 })
+    const rows = stdout.trim().split(/\r?\n/).slice(1)
+      .map(line => line.replace(/"/g, '').split(',').map(Number))
+      .filter(row => row.length === 3 && row.every(Number.isFinite))
+    const descendants = new Set([rootPid])
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const [pid, ppid] of rows) {
+        if (descendants.has(ppid) && !descendants.has(pid)) {
+          descendants.add(pid)
+          changed = true
+        }
+      }
+    }
+    const bytes = rows.filter(([pid]) => descendants.has(pid)).reduce((sum, [, , workingSet]) => sum + workingSet, 0)
+    return Math.round(bytes / 1024)
+  }
   const { stdout } = await execFileAsync('/bin/ps', ['-axo', 'pid=,ppid=,rss='])
   const rows = stdout.trim().split('\n').map(line => line.trim().split(/\s+/).map(Number))
     .filter(row => row.length === 3 && row.every(Number.isFinite))
@@ -209,7 +256,7 @@ async function runSample({ runtime, dshHome, resetCache, sample }) {
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
     env: {
-      PATH: '/usr/bin:/bin',
+      PATH: process.platform === 'win32' ? 'C:\\Windows\\System32;C:\\Windows' : '/usr/bin:/bin',
       HOME: processHome,
       LANG: process.env.LANG ?? 'en_US.UTF-8',
       DSH_HOME: dshHome,
@@ -329,7 +376,7 @@ async function runNativeProbePass(executable, probes) {
       timeout: 30_000,
       maxBuffer: 2 * 1024 * 1024,
       env: {
-        PATH: '/usr/bin:/bin',
+        PATH: process.platform === 'win32' ? 'C:\\Windows\\System32;C:\\Windows' : '/usr/bin:/bin',
         HOME: processHome,
         LANG: process.env.LANG ?? 'en_US.UTF-8',
         PKG_NATIVE_CACHE_PATH: nativeCache,
@@ -381,9 +428,9 @@ try {
     gates,
     passed: Object.values(gates).every(gate => gate.passed) && nativeProbes.passed,
   }
-  const output = resolve(root, 'runtime/staging/sea-performance-darwin-arm64.json')
+  const output = resolve(root, `runtime/staging/sea-performance-${target}.json`)
   await writeFile(output, `${JSON.stringify(report, null, 2)}\n`)
-  console.log(JSON.stringify({ ok: report.passed, output: 'runtime/staging/sea-performance-darwin-arm64.json', gates }))
+  console.log(JSON.stringify({ ok: report.passed, output: `runtime/staging/sea-performance-${target}.json`, gates }))
   if (!report.passed) process.exitCode = 1
 } finally {
   await Promise.all([...activeChildren].map(stopProcess))

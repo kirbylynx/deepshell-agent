@@ -154,8 +154,18 @@ const releaseDmgManifest = process.platform === 'darwin' && dmgManifestArgument 
   ? await optionalJson(resolve(dmgManifestArgument))
   : null
 const portableManifestArgument = argValue('--portable-manifest', resolve(root, 'runtime/staging/package-release-win32-x64-windows-portable.json'))
-const windowsNsisManifestArgument = argValue('--windows-nsis-manifest', undefined)
-const windowsInstalledTreeManifestArgument = argValue('--windows-installed-tree-manifest', undefined)
+// Windows 宿主模式下，NSIS / installed-tree manifest 与 installer 资产默认来自本机同一
+// 构建；一旦调用方显式提供外部 Windows 资产（如跨版本契约测试或 cross-device 汇总），
+// 就不再套用本机默认，避免版本/基线错配。
+const windowsLocalManifestDefaults = process.platform === 'win32' && !hasArg('--windows-installer')
+const windowsNsisManifestArgument = argValue(
+  '--windows-nsis-manifest',
+  windowsLocalManifestDefaults ? resolve(root, 'runtime/staging/package-release-win32-x64-nsis-installer.json') : undefined,
+)
+const windowsInstalledTreeManifestArgument = argValue(
+  '--windows-installed-tree-manifest',
+  windowsLocalManifestDefaults ? resolve(root, 'runtime/staging/package-release-win32-x64-windows-installed-tree.json') : undefined,
+)
 const windowsPortableManifestArgument = argValue('--windows-portable-manifest', portableManifestArgument)
 const portableManifestExplicit = hasArg('--portable-manifest') || hasArg('--windows-portable-manifest')
 const combinedWindowsInputExplicit = isCombinedWindowsPackageReportInput({
@@ -500,7 +510,9 @@ if (releaseManifestSummary.status === 'present' && releaseManifest.artifactKind 
   }
 }
 if (validReleaseWindowsNsisManifest !== null) {
-  if (!explicitWindowsInstaller) {
+  // Windows 宿主模式下 NSIS manifest 与 installer 都默认来自本机同一构建；
+  // 只有 cross-device（macOS 汇总）才要求显式 --windows-installer 校验外部资产。
+  if (process.platform !== 'win32' && !explicitWindowsInstaller) {
     throw new Error('显式 Windows NSIS manifest 必须同时提供 --windows-installer 以校验安装包资产')
   }
   const installerInspection = validReleaseWindowsNsisManifest.inspections.find(item => item.subject === 'nsis-installer')
@@ -564,13 +576,17 @@ if (schema6Report && runtimeAcceptanceEvidence !== null) {
   if (!validateOnDevice(runtimeOnDeviceEvidence)) {
     throw new Error(`Runtime on-device evidence schema 无效：${JSON.stringify(validateOnDevice.errors)}`)
   }
+  const gateExceptionDocument = process.platform === 'win32'
+    ? await optionalJson(resolve(root, 'runtime/manifest/windows-gate-exceptions.json'))
+    : null
+  const performanceGateExceptions = gateExceptionDocument?.exceptions?.performanceGates ?? []
   runtimeAcceptance = summarizeRuntimeAcceptance(runtimeAcceptanceEvidence, {
     applicationVersion: runtimeLock.applicationVersion,
     target: runtimePlatform,
     dshVersion: runtimeLock.dsh.version,
     nodeVersion: runtimeLock.node.version,
     seaSha256: validReleaseManifest.runtime.executable.sha256,
-  }, runtimeOnDeviceEvidence)
+  }, runtimeOnDeviceEvidence, performanceGateExceptions)
 }
 
 function firstRunFootprint() {

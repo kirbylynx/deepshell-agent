@@ -21,7 +21,7 @@ describe('runtime lock', () => {
         version: '6.22.0',
         patch: {
           path: 'patches/@yao-pkg__pkg@6.22.0.patch',
-          sha256: 'feaa0f29693f9c7b9ce3e8b430412f5c597149c96c8149c27b09be64eb5db78c'
+          sha256: '34295ed217a55fc962dda1c12ef756f84d94cd1afd739613b4d43ebee7b75e52'
         }
       },
       mode: 'enhanced',

@@ -70,18 +70,26 @@ jobs:
           "DEEPSHELL_VERSION=$version" >> $env:GITHUB_ENV
 
       - name: Prepare runtime
-        run: pnpm runtime:prepare --target all
+        run: pnpm runtime:prepare --target win32-x64
 
       - name: Verify runtime and profile
         run: |
-          pnpm runtime:verify --target all
+          pnpm runtime:verify --target win32-x64
           pnpm profile:prepare
           pnpm profile:verify
+
+      - name: Prepare and verify SEA runtime
+        run: |
+          pnpm runtime:sea:prepare --target win32-x64
+          pnpm runtime:sea:verify --target win32-x64
+
+      - name: SEA runtime smoke
+        run: pnpm runtime:sea:smoke --target win32-x64
 
       - name: Check Windows route
         run: pnpm release:windows:check
 
-      - name: Package NSIS installer
+      - name: Package NSIS installer and portable ZIP
         run: pnpm package:mvp
 
       - name: Collect release support artifacts
