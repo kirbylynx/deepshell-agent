@@ -1015,19 +1015,69 @@ describe('v0.1.1 release hardening scripts', () => {
     }
   })
 
-  it('security audit dry-run 和 Windows route check 不产生伪通过', async () => {
-    await runNode(['scripts/security-audit.mjs', '--dry-run'])
-    await runNode(['scripts/verify-windows-route.mjs'])
-    const audit = JSON.parse(await readFile(resolve(root, 'runtime/staging/security-audit.json'), 'utf8'))
-    const windows = JSON.parse(await readFile(resolve(root, 'runtime/staging/windows-route-check.json'), 'utf8'))
-    expect(audit.audits.every((item: { status: string }) => item.status === 'dry-run' || item.status === 'missing-runtime')).toBe(true)
-    if (process.platform !== 'win32') {
-      expect(windows.status).toBe('route-documented-current-platform-unable')
-      expect(windows.validationPolicy).toContain('never count as Windows installer pass')
-      expect(windows.checks.msvc.status).toBe('not-checked-current-platform')
+  it('security audit dry-run 与 Windows route check 使用显式输出且不产生伪通过', async () => {
+    // F-1505-WR001/WR002：dry-run 与 route check 必须支持 --output 隔离；
+    // dry-run 顶层 status 不得写成 completed，Windows incomplete 必须 fail closed。
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-check-evidence-'))
+    try {
+      const auditOutput = resolve(temporary, 'security-audit.json')
+      await runNode(['scripts/security-audit.mjs', '--dry-run', '--output', auditOutput])
+      const audit = JSON.parse(await readFile(auditOutput, 'utf8'))
+      expect(audit.status).toBe('dry-run')
+      expect(audit.audits.every((item: { status: string }) => item.status === 'dry-run')).toBe(true)
+
+      const routeOutput = resolve(temporary, 'windows-route-check.json')
+      let routeRejected = false
+      try {
+        await runNode(['scripts/verify-windows-route.mjs', '--output', routeOutput])
+      } catch {
+        // Windows 主机前置检查 incomplete 时脚本按契约以非零退出码 fail closed。
+        routeRejected = true
+      }
+      const windows = JSON.parse(await readFile(routeOutput, 'utf8'))
+      if (process.platform === 'win32') {
+        expect(['windows-preflight-pass', 'windows-preflight-incomplete']).toContain(windows.status)
+        expect(routeRejected).toBe(windows.status !== 'windows-preflight-pass')
+        if (windows.status === 'windows-preflight-pass') {
+          expect(windows.checks.msvc.status).toBe('present')
+        }
+      } else {
+        expect(windows.status).toBe('route-documented-current-platform-unable')
+        expect(windows.validationPolicy).toContain('never count as Windows installer pass')
+        expect(windows.checks.msvc.status).toBe('not-checked-current-platform')
+        expect(routeRejected).toBe(false)
+      }
+      expect(windows.commands).toContain('pnpm security:audit')
+      expect(windows.commands.indexOf('pnpm security:audit')).toBeLessThan(windows.commands.indexOf('pnpm release:stage'))
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
     }
-    expect(windows.commands).toContain('pnpm security:audit')
-    expect(windows.commands.indexOf('pnpm security:audit')).toBeLessThan(windows.commands.indexOf('pnpm release:stage'))
+  })
+
+  it('pnpm check 的 security audit / route check 调用不会覆盖正式 runtime/staging 证据', async () => {
+    // F-1505-WR001/WR002 回归：正式证据（security-audit.json / windows-route-check.json）
+    // 只允许由正式命令（无 --output 的 pnpm security:audit / release:windows:check）生成；
+    // pnpm check 内的测试与 dry-run 一律隔离到临时目录，不得写、删或覆盖正式文件。
+    const officialAudit = resolve(root, 'runtime/staging/security-audit.json')
+    const officialRoute = resolve(root, 'runtime/staging/windows-route-check.json')
+    const readOrNull = async (path: string) => readFile(path).then(value => value, () => null)
+    const beforeAudit = await readOrNull(officialAudit)
+    const beforeRoute = await readOrNull(officialRoute)
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-check-evidence-guard-'))
+    try {
+      // ① dry-run 不携带 --output：按契约只打印、不落盘，正式文件必须保持原样。
+      await runNode(['scripts/security-audit.mjs', '--dry-run'])
+      // ② route check 使用临时输出：与 pnpm check 中的调用方式一致。
+      try {
+        await runNode(['scripts/verify-windows-route.mjs', '--output', resolve(temporary, 'route.json')])
+      } catch {
+        // Windows 主机前置检查不完整时按契约 fail closed；本用例只断言正式证据不被触碰。
+      }
+      expect(await readOrNull(officialAudit)).toEqual(beforeAudit)
+      expect(await readOrNull(officialRoute)).toEqual(beforeRoute)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
   })
 
   it('Windows release workflow 在构建前固定获取并断言 canonical v0.1.3 tag', async () => {

@@ -1,11 +1,35 @@
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { access, writeFile, mkdir, readFile, readdir } from 'node:fs/promises'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { root } from './lib/runtime.mjs'
 import { redactedJson } from './lib/redaction.mjs'
 
 const execFileAsync = promisify(execFile)
+
+// 解析 `--name <value>` / `--name=<value>` 形式的命令行取值；缺失取值立即报错。
+function commandLineValue(name) {
+  const argv = process.argv.slice(2)
+  const inline = argv.find(value => value.startsWith(`${name}=`))
+  if (inline !== undefined) {
+    const value = inline.slice(name.length + 1)
+    if (!value) throw new Error(`${name} 缺少取值`)
+    return value
+  }
+  const index = argv.indexOf(name)
+  if (index >= 0) {
+    const value = argv[index + 1]
+    if (!value || value.startsWith('--')) throw new Error(`${name} 缺少取值`)
+    return value
+  }
+  return null
+}
+
+// F-1505-WR002：输出路径必须可显式隔离。
+// 正式 route check（无 --output）写 runtime/staging/windows-route-check.json；
+// 测试与脚本集成通过 `--output <临时路径>` 隔离，不得覆盖正式证据。
+const explicitOutput = commandLineValue('--output')
+const outputPath = resolve(root, explicitOutput ?? 'runtime/staging/windows-route-check.json')
 
 // 探测命令是否存在并取一行版本信息。
 // 约束：Node 出于安全考虑（CVE-2024-27980）拒绝在未启用 shell 时启动 .cmd/.bat，
@@ -38,6 +62,108 @@ async function probeCommand(command, args = ['--version']) {
   if (!result.ok) return { status: 'missing', message: result.message }
   const line = result.output.split(/\r?\n/).find(value => value.trim().length > 0) ?? ''
   return { status: 'present', output: line }
+}
+
+async function exists(path) {
+  try {
+    await access(path)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function runExecutable(executable, args, timeout = 15_000) {
+  try {
+    const { stdout, stderr } = await execFileAsync(executable, args, { timeout })
+    return { ok: true, output: `${stdout}${stderr}`.trim() }
+  } catch (error) {
+    return { ok: false, message: error.code === 'ENOENT' ? 'executable not found' : error.message }
+  }
+}
+
+// 在 Visual Studio 安装目录的 VC/Tools/MSVC/<版本> 下寻找 MSVC 编译器（x64 优先）。
+async function findMsvcCompiler(installationPath, detection) {
+  const toolsRoot = resolve(installationPath, 'VC/Tools/MSVC')
+  let versions
+  try {
+    versions = await readdir(toolsRoot)
+  } catch {
+    return null
+  }
+  for (const version of versions.sort().reverse()) {
+    for (const host of ['Hostx64/x64', 'Hostx86/x64']) {
+      const cl = resolve(toolsRoot, version, 'bin', host, 'cl.exe')
+      if (await exists(cl)) {
+        return { status: 'present', detection, installationPath, toolset: version, cl }
+      }
+    }
+  }
+  return null
+}
+
+// F-1505-WR002：MSVC 检测不得只看当前 shell 的 PATH。
+// 普通 PowerShell 没有 Developer 环境（cl.exe 不在 PATH），但 Visual Studio / Build Tools
+// 可能已经安装；必须通过 vswhere（Visual Studio 安装器官方接口）与标准安装路径继续确认，
+// 也不能在都找不到时无条件判通过——最后如实记为 missing。
+async function msvcCheck() {
+  if (process.platform !== 'win32') return { status: 'not-checked-current-platform' }
+
+  // ① 当前 PATH：Developer PowerShell / vcvars 环境
+  const onPath = await probeCommand('cl.exe', [])
+  if (onPath.status === 'present') {
+    return { status: 'present', detection: 'path', output: onPath.output }
+  }
+
+  const programFilesX86 = process.env['PROGRAMFILES(X86)'] ?? 'C:/Program Files (x86)'
+  const programFiles = process.env.ProgramFiles ?? 'C:/Program Files'
+
+  // ② vswhere：标准 Visual Studio 安装信息（含 Build Tools）
+  const vswhere = resolve(programFilesX86, 'Microsoft Visual Studio/Installer/vswhere.exe')
+  if (await exists(vswhere)) {
+    const queried = await runExecutable(vswhere, [
+      '-latest', '-products', '*',
+      '-requires', 'Microsoft.VisualStudio.Component.VC.Tools.x86.x64',
+      '-property', 'installationPath'
+    ])
+    if (queried.ok) {
+      const installation = queried.output.split(/\r?\n/).map(line => line.trim()).filter(Boolean)[0]
+      if (installation) {
+        const found = await findMsvcCompiler(installation, 'vswhere')
+        if (found) return found
+      }
+    }
+  }
+
+  // ③ 标准安装路径扫描：vswhere 不可用时仍可判定（VS 2019/2022 各 edition / BuildTools）
+  for (const base of [programFilesX86, programFiles]) {
+    const visualStudio = resolve(base, 'Microsoft Visual Studio')
+    let years
+    try {
+      years = await readdir(visualStudio)
+    } catch {
+      continue
+    }
+    for (const year of years.sort().reverse()) {
+      if (!/^\d{4}$/.test(year)) continue
+      const yearRoot = resolve(visualStudio, year)
+      let editions
+      try {
+        editions = await readdir(yearRoot)
+      } catch {
+        continue
+      }
+      for (const edition of editions) {
+        const found = await findMsvcCompiler(resolve(yearRoot, edition), 'standard-install-path')
+        if (found) return found
+      }
+    }
+  }
+
+  return {
+    status: 'missing',
+    message: '未在 PATH、vswhere 或 Visual Studio 标准安装路径中找到 MSVC cl.exe'
+  }
 }
 
 async function registryValuePresent(key, valueName) {
@@ -89,9 +215,7 @@ const checks = {
   pnpm: await probeCommand(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm'),
   rustc: await probeCommand('rustc'),
   cargo: await probeCommand('cargo'),
-  msvc: process.platform === 'win32'
-    ? await probeCommand('cl.exe', [])
-    : { status: 'not-checked-current-platform' },
+  msvc: await msvcCheck(),
   webview2: await webview2Runtime(),
 }
 const commands = [
@@ -129,9 +253,9 @@ const result = {
   commands,
   validationPolicy: 'macOS route checks never count as Windows installer pass'
 }
-const outputDirectory = resolve(root, 'runtime/staging')
-await mkdir(outputDirectory, { recursive: true })
-await writeFile(resolve(outputDirectory, 'windows-route-check.json'), redactedJson(result))
+await mkdir(dirname(outputPath), { recursive: true })
+await writeFile(outputPath, redactedJson(result))
+
 if (checks.platform.status !== 'pass') {
   console.log(`Windows 打包路线待验证：当前是 ${process.platform}-${process.arch}，需要 Windows x64 环境。`)
   console.log(`后续 Windows 环境执行：${commands.join(' && ')}`)
@@ -139,4 +263,14 @@ if (checks.platform.status !== 'pass') {
   console.log('Windows x64 打包路线前置检查完成，可继续执行 pnpm package:mvp。')
 } else {
   console.log('Windows x64 打包路线已记录，但前置检查不完整；请先补齐缺失工具或运行 Tauri 打包暴露具体环境错误。')
+}
+
+// F-1505-WR002：Windows 正式检查不是 pass 时必须 fail closed（非零退出码），
+// 停止交接链路——不得在 incomplete 状态下继续生成最终回传包。
+if (process.platform === 'win32' && result.status !== 'windows-preflight-pass') {
+  const missing = Object.entries(checks)
+    .filter(([, value]) => value.status !== 'present' && value.status !== 'pass')
+    .map(([name, value]) => `${name}:${value.status}`)
+  console.error(`Windows preflight incomplete（fail closed）：${missing.join(', ')}；报告：${outputPath}`)
+  process.exitCode = 1
 }
