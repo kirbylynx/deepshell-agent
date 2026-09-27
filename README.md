@@ -14,7 +14,7 @@ DeepShell Agent does not reimplement the Agent Runtime and does not fork the off
 
 The latest published baseline is the unsigned `v0.1.4` preview release. It completed Windows 11 x64 on-device acceptance and the final macOS arm64 regression, and adds per-platform runtime trimming, a Windows portable ZIP, safer Windows uninstall cleanup, and platform-specific native menus while retaining DeepSeek Harness `0.1.5-rc.1`, the official Web UI, and the public-extension-point architecture.
 
-The `v0.1.5` release candidate (not yet published) replaces the extracted Node.js + DSH runtime tree with a platform-specific single-file SEA Runtime and pins DeepSeek Harness `0.1.5-rc.2`. It completed Windows x64 W0–W3 acceptance on the final clean-rebuild artifacts (including the real-device tool re-test) and the macOS arm64 round; its assets are finalized during combined release staging. See the [v0.1.5 release notes](docs/releases/v0.1.5.md).
+The `v0.1.5` release candidate (not yet published) replaces the extracted Node.js + DSH runtime tree with a platform-specific single-file SEA Runtime and pins DeepSeek Harness `0.1.5-rc.2`. It completed Windows x64 W0–W3 acceptance on the final clean-rebuild artifacts (including the real-device tool re-test) and the macOS arm64 round; the W3b rework then rebuilt the assets from a further clean commit after closing five handoff-audit findings (real security audits, a `windows-preflight-pass` route check, evidence-log hygiene, and `/`-separator ZIP delivery). Its assets are finalized during combined release staging. See the [v0.1.5 release notes](docs/releases/v0.1.5.md).
 
 Capabilities already included in the source baseline:
 
@@ -81,7 +81,7 @@ Models, routes, base URLs, API keys, and model lists are managed through the off
 
 ## Getting and running
 
-For published binaries, use GitHub Releases. The `v0.1.4` preview release provides a macOS arm64 DMG, a Windows x64 NSIS installer, and a Windows x64 portable ZIP. These preview assets are not Developer ID/notarized or Windows code-signed. The `v0.1.5` candidate switches both platforms to the single-file SEA Runtime; its Windows x64 NSIS installer and portable ZIP are produced during combined release staging under the same unsigned-preview policy.
+For published binaries, use GitHub Releases. The `v0.1.4` preview release provides a macOS arm64 DMG, a Windows x64 NSIS installer, and a Windows x64 portable ZIP. These preview assets are not Developer ID/notarized or Windows code-signed. The `v0.1.5` candidate switches both platforms to the single-file SEA Runtime; its Windows x64 NSIS installer and portable ZIP are built on Windows (delivered through the private handoff package) and combined during release staging under the same unsigned-preview policy.
 
 The current source baseline has not completed all formal binary-distribution gates. The public repository is primarily for source publication, architecture review, and reproducible builds. If you want to build from source, see “For contributors” below.
 
@@ -107,7 +107,7 @@ Windows users can use either the NSIS installer or the portable ZIP. The portabl
 
 The `v0.1.4` preview release completed WIN-01 through WIN-13 on real Windows 11 x64 hardware, including installed/portable session creation, UI-level session and Provider sharing in both directions, portable-directory removal with retained user data, native menu inspection, orphan-Sidecar uninstall cleanup, and representative `v0.1.3` session upgrade. See the [v0.1.4 closeout](docs/releases/v0.1.4.md).
 
-The `v0.1.5` candidate completed Windows x64 W0–W3 acceptance on the final clean-rebuild artifacts: fresh install, `v0.1.4` to `v0.1.5` upgrade with legacy-runtime removal, portable/installed switching, rollback with SEA proxy files present, orphan/uninstall ownership, Windows Defender scans, SEA on-device native-cache evidence, and a real-device tool re-test (`read`, `write`, `edit`, `glob`, `grep`, `pwsh`). See the [v0.1.5 Windows handoff](docs/plans/v0.1.5-sea-runtime/windows-handoff.md).
+The `v0.1.5` candidate completed Windows x64 W0–W3 acceptance on the final clean-rebuild artifacts: fresh install, `v0.1.4` to `v0.1.5` upgrade with legacy-runtime removal, portable/installed switching, rollback with SEA proxy files present, orphan/uninstall ownership, Windows Defender scans, SEA on-device native-cache evidence, and a real-device tool re-test (`read`, `write`, `edit`, `glob`, `grep`, `pwsh`). The W3b rework then rebuilt from the clean `6e660f3` commit and re-ran the affected evidence (real security audits, a `windows-preflight-pass` route check, the install/uninstall regression, a fresh app boot, and the on-device, report and size gates). See the [v0.1.5 Windows handoff](docs/plans/v0.1.5-sea-runtime/windows-handoff.md).
 
 **`v0.1.3` completed end-to-end acceptance on real Windows x64 hardware** (setup wizard, first launch, data directory, credential setup, sessions and tools, single instance, dynamic ports, malicious-origin isolation, the exit-cleanup scenario tested at that time, crash recovery, diagnostics bundle, environment restoration). Acceptance found and fixed 8 Windows platform defects; see the [v0.1.3 closeout](docs/releases/v0.1.3.md).
 
@@ -116,12 +116,12 @@ The `v0.1.5` candidate completed Windows x64 W0–W3 acceptance on the final cle
 - **Uninstall does not clean up fully**: later Windows measurements observed orphan Sidecar processes after both normal app close and abnormal app termination. When the orphan keeps native libraries mapped, the install directory can retain 5 files / 108.54 MB, which require terminating that process and deleting them manually. This was not fixed in `v0.1.3`; `v0.1.4` implements and validates the `REL-024` cleanup route.
 - **Per-platform runtime trimming was not implemented in `v0.1.3`**: its installer bundles both the macOS and Windows Node runtimes, and the macOS half (4800 files / 187.5 MB) is entirely unused on Windows. `v0.1.4` implements and validates the `REL-022` macOS and Windows paths.
 - Two WebView2 matrix dimensions were not measured this round: font/CJK rendering, and the file picker / drag-and-drop / clipboard.
-- Dependency vulnerability audit is unavailable on this machine (the configured npm mirror has no audit endpoint), so **dependencies have not passed a vulnerability scan**.
+- Dependency vulnerability audits in the current pipeline query the official npm registry and fail closed on incomplete results; the locally configured mirror (`registry.npmmirror.com`) exposes no audit endpoint, so audit queries pin `registry.npmjs.org` (see the audit notes below).
 - Windows code signing is not done.
 
 The final `v0.1.4` audit found no production-root, bundled-DSH-runtime, or Rust advisories. The root development/test toolchain still reports four high and one moderate warning; these are recorded as non-blocking build-tooling findings rather than shipped-runtime findings.
 
-In the `v0.1.5` round the Rust audit completed with zero advisories, while the npm-side audits (`node-root-production`, `node-root-all`, `dsh-runtime`) could not run because the configured registry mirror (`registry.npmmirror.com`) exposes no audit endpoint (`ERR_PNPM_AUDIT_ENDPOINT_NOT_EXISTS`). npm-side advisories are therefore **not** re-verified for this round, and the v0.1.4 npm-side result remains the latest available evidence. `pnpm security-audit` reports these errors instead of claiming a pass.
+In the `v0.1.5` round (W3b) all four audits completed with real results against the official registry: `node-root-production`, `dsh-runtime`, and `rust` report zero advisories; `node-root-all` reports four high and one moderate advisory through the development/test WebdriverIO toolchain (non-blocking build tooling, unchanged from `v0.1.4`). An earlier W3 attempt recorded no npm-side result because the configured mirror exposes no audit endpoint, and a unit test had overwritten the official report; both defects are fixed — audit queries pin the official registry, dry-run never writes the official report, and a non-dry-run audit fails closed (non-zero exit) if any sub-audit is not a real completed result.
 
 ## Usage
 
