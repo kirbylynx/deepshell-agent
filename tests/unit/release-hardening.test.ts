@@ -20,6 +20,21 @@ function sha256Text(value: string) {
   return createHash('sha256').update(value).digest('hex')
 }
 
+function completedSecurityAudit(version: string) {
+  return {
+    schemaVersion: 1,
+    application: { name: 'DeepShell Agent', version },
+    status: 'completed',
+    audits: ['node-root-production', 'node-root-all', 'dsh-runtime', 'rust'].map(label => ({
+      label,
+      status: 'completed',
+      vulnerabilities: label === 'rust'
+        ? { found: false, count: 0, list: [] }
+        : { info: 0, low: 0, moderate: 0, high: 0, critical: 0 },
+    })),
+  }
+}
+
 function combinedPackageReport(version: string, shas: {
   dmg: string
   installer: string
@@ -619,7 +634,7 @@ describe('v0.1.1 release hardening scripts', () => {
       await writeFile(dmg, 'dmg')
       await writeFile(installer, 'installer')
       await writeFile(portable, 'portable')
-      await writeFile(support, `{"application":{"version":"${version}"}}\n`)
+      await writeFile(support, JSON.stringify(completedSecurityAudit(version)))
       await writeFile(report, JSON.stringify({
         ...combinedPackageReport(version, {
           dmg: sha256Text('dmg'),
@@ -646,9 +661,47 @@ describe('v0.1.1 release hardening scripts', () => {
       const manifest = JSON.parse(await readFile(resolve(output, 'release-manifest.json'), 'utf8'))
       expect(manifest.assets.find((asset: { label: string }) => asset.label === 'package-report').status).toBe('present')
       expect(await readFile(resolve(output, 'DeepShell.Agent_0.1.4_x64-portable.zip'), 'utf8')).toBe('portable')
+
+      // F-1505-C1-003：沿用完整 report/资产，但正式审计失败时必须拒绝替换已存在的快照。
+      const originalManifest = await readFile(resolve(output, 'release-manifest.json'), 'utf8')
+      const failedAudit = completedSecurityAudit(version)
+      failedAudit.status = 'incomplete'
+      await writeFile(support, JSON.stringify(failedAudit))
+      await expect(runNode([
+        'scripts/release-staging.mjs', '--version', version, '--output-dir', output,
+        '--dmg', dmg, '--windows-installer', installer, '--windows-portable', portable,
+        '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
+        '--license-inventory', support, '--sbom', support, '--package-report', report,
+        '--security-audit', support,
+      ])).rejects.toThrow(/security audit/)
+      expect(await readFile(resolve(output, 'release-manifest.json'), 'utf8')).toBe(originalManifest)
     } finally {
       await rm(temporary, { recursive: true, force: true })
     }
+  })
+
+  it('combined staging 对真实审计摘要 fail closed，保留非 critical 工具警告', async () => {
+    // @ts-expect-error 该 CLI 导出审计 guard 供聚焦测试使用。
+    const { validateCompletedSecurityAudit } = await import('../../scripts/release-staging.mjs')
+    const valid = completedSecurityAudit('0.1.5')
+    expect(() => validateCompletedSecurityAudit(valid)).not.toThrow()
+    for (const status of ['dry-run', 'incomplete', 'fail-critical', 'fail-rust-review']) {
+      expect(() => validateCompletedSecurityAudit({ ...valid, status })).toThrow(/security audit/)
+    }
+    expect(() => validateCompletedSecurityAudit({ ...valid, audits: [] })).toThrow(/security audit/)
+    const subFailed = structuredClone(valid)
+    subFailed.audits[0].status = 'dry-run'
+    expect(() => validateCompletedSecurityAudit(subFailed)).toThrow(/子项未完成/)
+    const critical = structuredClone(valid)
+    critical.audits[0].vulnerabilities.critical = 1
+    expect(() => validateCompletedSecurityAudit(critical)).toThrow(/漏洞摘要/)
+    const rust = structuredClone(valid)
+    rust.audits[3].vulnerabilities.found = true
+    rust.audits[3].vulnerabilities.count = 1
+    expect(() => validateCompletedSecurityAudit(rust)).toThrow(/漏洞摘要/)
+    const warning = structuredClone(valid)
+    warning.audits[1].vulnerabilities.high = 4
+    expect(() => validateCompletedSecurityAudit(warning)).not.toThrow()
   })
 
   it('combined release staging 拒绝不完整或哈希不匹配的 package report', async () => {
@@ -1010,6 +1063,108 @@ describe('v0.1.1 release hardening scripts', () => {
       const sbom = JSON.parse(await readFile(output, 'utf8'))
       expect(sbom.format).toBe('deepshell-sbom-baseline')
       expect(sbom.components.some((component: { name: string }) => component.name === '@deepseek-ai/dsh')).toBe(true)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it.each([
+    { output: '', exitCode: 0 },
+    { output: '', exitCode: 1 },
+    { output: '   ', exitCode: 1 },
+    { output: '{}', exitCode: 0 },
+    { output: '{}', exitCode: 1 },
+    { output: 'null', exitCode: 1 },
+    { output: '{"vulnerabilities":{}}', exitCode: 0 },
+    { output: 'not-json', exitCode: 1 },
+  ])('security audit 拒绝空结果或非审计 JSON：$output / exit=$exitCode', async ({ output, exitCode }) => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-audit-failure-'))
+    try {
+      const reportPath = resolve(temporary, 'audit.json')
+      // 通过真实脚本入口注入子进程结果，不调用网络，也不写正式审计证据。
+      const harness = `
+        import childProcess from 'node:child_process'
+        import { promisify } from 'node:util'
+        import { syncBuiltinESMExports } from 'node:module'
+        const fake = () => {}
+        fake[promisify.custom] = async () => {
+          const stdout = ${JSON.stringify(output)}
+          if (${exitCode} === 0) return { stdout, stderr: '' }
+          const error = new Error('模拟审计退出失败')
+          Object.assign(error, { code: ${exitCode}, stdout, stderr: '' })
+          throw error
+        }
+        childProcess.execFile = fake
+        syncBuiltinESMExports()
+        process.argv = [process.execPath, 'scripts/security-audit.mjs', '--output', ${JSON.stringify(reportPath)}]
+        await import('./scripts/security-audit.mjs')
+      `
+      await expect(runNode(['--input-type=module', '-e', harness])).rejects.toMatchObject({ code: 1 })
+      const report = JSON.parse(await readFile(reportPath, 'utf8'))
+      expect(report.status).toBe('incomplete')
+      expect(report.audits.every((item: { status: string }) => item.status === 'completed-unparseable')).toBe(true)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('security audit 保留有效非零退出的漏洞结果并阻断 critical', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-audit-critical-'))
+    try {
+      const reportPath = resolve(temporary, 'audit.json')
+      const harness = `
+        import childProcess from 'node:child_process'
+        import { promisify } from 'node:util'
+        import { syncBuiltinESMExports } from 'node:module'
+        const fake = () => {}
+        fake[promisify.custom] = async (command) => {
+          if (command === 'cargo') return { stdout: JSON.stringify({ vulnerabilities: { found: false, count: 0, list: [] } }) }
+          const error = new Error('模拟有效漏洞报告')
+          Object.assign(error, { code: 1, stdout: JSON.stringify({ metadata: { vulnerabilities: { info: 0, low: 0, moderate: 0, high: 0, critical: 1 } } }) })
+          throw error
+        }
+        childProcess.execFile = fake
+        syncBuiltinESMExports()
+        process.argv = [process.execPath, 'scripts/security-audit.mjs', '--output', ${JSON.stringify(reportPath)}]
+        await import('./scripts/security-audit.mjs')
+      `
+      await expect(runNode(['--input-type=module', '-e', harness])).rejects.toMatchObject({ code: 1 })
+      const report = JSON.parse(await readFile(reportPath, 'utf8'))
+      expect(report.status).toBe('fail-critical')
+      expect(report.audits.every((item: { status: string }) => item.status === 'completed')).toBe(true)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it.each([false, true])('security audit 不漏判 Rust 漏洞；进程中断=%s', async (interrupted) => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-audit-rust-'))
+    try {
+      const reportPath = resolve(temporary, 'audit.json')
+      const harness = `
+        import childProcess from 'node:child_process'
+        import { promisify } from 'node:util'
+        import { syncBuiltinESMExports } from 'node:module'
+        const fake = () => {}
+        fake[promisify.custom] = async (command) => {
+          const stdout = JSON.stringify(command === 'cargo'
+            ? { vulnerabilities: { found: true, count: 1, list: [{ advisory: { id: 'RUSTSEC-TEST', cvss: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H' } }] } }
+            : { metadata: { vulnerabilities: { info: 0, low: 0, moderate: 0, high: 0, critical: 0 } } })
+          if (command !== 'cargo') return { stdout }
+          const error = new Error('模拟 Rust 审计失败')
+          Object.assign(error, { code: 1, stdout, ${interrupted ? "killed: true, signal: 'SIGTERM'" : 'killed: false'} })
+          throw error
+        }
+        childProcess.execFile = fake
+        syncBuiltinESMExports()
+        process.argv = [process.execPath, 'scripts/security-audit.mjs', '--output', ${JSON.stringify(reportPath)}]
+        await import('./scripts/security-audit.mjs')
+      `
+      await expect(runNode(['--input-type=module', '-e', harness])).rejects.toMatchObject({ code: 1 })
+      const report = JSON.parse(await readFile(reportPath, 'utf8'))
+      expect(report.status).toBe(interrupted ? 'incomplete' : 'fail-rust-review')
+      expect(report.audits.find((item: { label: string }) => item.label === 'rust').status)
+        .toBe(interrupted ? 'failed' : 'completed')
     } finally {
       await rm(temporary, { recursive: true, force: true })
     }

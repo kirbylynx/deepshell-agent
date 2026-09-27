@@ -59,9 +59,18 @@ async function exists(path) {
   }
 }
 
-function parseAuditJson(text) {
+function parseAuditJson(text, label) {
+  // 成功与异常退出共用解析边界：空输出不能被补成 {} 后误判为零漏洞。
+  if (!String(text ?? '').trim()) {
+    return {
+      status: 'completed-unparseable',
+      error: { code: 'empty-output', summary: '审计命令没有输出任何 JSON 结果' },
+      vulnerabilities: {}
+    }
+  }
   try {
-    const json = JSON.parse(text || '{}')
+    const json = JSON.parse(text)
+    if (!json || typeof json !== 'object' || Array.isArray(json)) throw new Error('无效审计对象')
     if (json.error) {
       return {
         status: 'audit-error',
@@ -72,7 +81,17 @@ function parseAuditJson(text) {
         vulnerabilities: {}
       }
     }
-    const vulnerabilities = json.metadata?.vulnerabilities ?? json.vulnerabilities ?? {}
+    const vulnerabilities = json.metadata?.vulnerabilities ?? json.vulnerabilities
+    // 可解析 JSON 不等于审计报告：拒绝 {}、任意对象及缺少正式漏洞摘要的结果。
+    const hasCounts = vulnerabilities && ['info', 'low', 'moderate', 'high', 'critical']
+      .every(key => Number.isSafeInteger(vulnerabilities[key]) && vulnerabilities[key] >= 0)
+    const hasRustSummary = label === 'rust' && vulnerabilities
+      && typeof vulnerabilities.found === 'boolean'
+      && Number.isSafeInteger(vulnerabilities.count) && vulnerabilities.count >= 0
+      && Array.isArray(vulnerabilities.list)
+      && vulnerabilities.count === vulnerabilities.list.length
+      && vulnerabilities.found === (vulnerabilities.count > 0)
+    if (label === 'rust' ? !hasRustSummary : !hasCounts) throw new Error('缺少有效审计摘要')
     const advisories = Object.entries(json.advisories ?? {}).map(([id, advisory]) => ({
       id,
       module: advisory.module_name ?? advisory.name ?? 'unknown',
@@ -97,17 +116,7 @@ async function runAudit(label, command, args, options = {}) {
   if (dryRun) return { label, status: 'dry-run', command: [command, ...args].join(' ') }
   try {
     const { stdout } = await execFileAsync(...execPlan(command, args), { ...options, maxBuffer: 64 * 1024 * 1024 })
-    // 命令"退出成功但没有任何输出"同样属于未真正产出审计结果（例如被错误包装后空跑），
-    // 必须如实记为 completed-unparseable 并参与 fail closed，不得形成零漏洞假通过。
-    if (!String(stdout ?? '').trim()) {
-      return {
-        label,
-        status: 'completed-unparseable',
-        error: { code: 'empty-output', summary: '审计命令没有输出任何 JSON 结果' },
-        vulnerabilities: {}
-      }
-    }
-    return { label, ...parseAuditJson(stdout) }
+    return { label, ...parseAuditJson(stdout, label) }
   } catch (error) {
     if (error.code === 'ENOENT') return { label, status: 'tool-missing', install: label === 'rust' ? 'cargo install cargo-audit' : undefined }
     const stderr = String(error.stderr ?? '')
@@ -115,13 +124,13 @@ async function runAudit(label, command, args, options = {}) {
       return { label, status: 'tool-missing', install: 'cargo install cargo-audit' }
     }
     // ⚠️ 审计命令**根本没启动**时（如 Windows 上直接 spawn `.cmd` 报 `EINVAL`），
-    // stdout 为空 → `parseAuditJson('')` 返回 `completed` + 零漏洞，形成**假通过**。
+    // 旧解析逻辑会把空 stdout 补成 {} 并形成 completed + 零漏洞的假通过。
     // 这类失败必须如实报为 failed，不得参与任何 gate 判定。
-    // 判定依据：error.code 为**字符串**表示系统级错误；真实审计失败时是**数字**退出码。
-    if (typeof error.code === 'string') {
-      return { label, status: 'failed', error: { code: error.code, summary: String(error.message ?? '').split('\n')[0] } }
+    // 只有明确的数字退出码才可解析漏洞报告；超时/信号终止也不能形成已完成审计。
+    if (typeof error.code !== 'number' || error.killed || error.signal) {
+      return { label, status: 'failed', error: { code: error.code ?? 'process-interrupted', summary: String(error.message ?? '').split('\n')[0] } }
     }
-    const parsed = parseAuditJson(String(error.stdout ?? ''))
+    const parsed = parseAuditJson(error.stdout, label)
     return { label, ...parsed, exitCode: error.code ?? 1 }
   }
 }
@@ -144,6 +153,9 @@ const criticalCount = audits.reduce((sum, item) => {
   const value = item.vulnerabilities?.critical
   return sum + (Number.isFinite(value) ? value : 0)
 }, 0)
+// cargo-audit 使用 found/count/list，而不是 npm 的 critical 等级计数。
+// 在没有可靠的 Rust 严重度分类器之前，任何 Rust 漏洞都必须阻断并人工审查，不能当成零漏洞。
+const rustVulnerabilityCount = audits.find(item => item.label === 'rust')?.vulnerabilities?.count ?? 0
 // F-1505-WR001：顶层 status 只有在**全部子审计真实执行完成**时才允许是 completed。
 // 任何 dry-run/tool-missing/failed/audit-error/completed-unparseable/missing-lockfile
 // 都必须体现为 incomplete，且非 dry-run 运行时返回非零退出码（fail closed）。
@@ -152,7 +164,9 @@ const status = dryRun
   ? 'dry-run'
   : criticalCount > 0
     ? 'fail-critical'
-    : incompleteAudits.length > 0 ? 'incomplete' : 'completed'
+    : rustVulnerabilityCount > 0
+      ? 'fail-rust-review'
+      : incompleteAudits.length > 0 ? 'incomplete' : 'completed'
 const report = {
   schemaVersion: 1,
   application: { name: 'DeepShell Agent', version: pkg.version },
@@ -162,7 +176,8 @@ const report = {
     critical: 'failure',
     high: 'warning unless runtime code execution, credential leak, or sandbox bypass',
     medium: 'warning',
-    low: 'informational'
+    low: 'informational',
+    rust: 'any vulnerability fails pending manual severity and runtime-impact review'
   },
   auditRegistry,
   audits,
@@ -186,6 +201,7 @@ if (dryRun && explicitOutput === null) {
 if (!dryRun) {
   const failures = []
   if (criticalCount > 0) failures.push(`critical vulnerabilities: ${criticalCount}`)
+  if (rustVulnerabilityCount > 0) failures.push(`Rust vulnerabilities require review: ${rustVulnerabilityCount}`)
   for (const item of incompleteAudits) failures.push(`${item.label}: ${item.status}`)
   if (failures.length > 0) {
     console.error(`security audit failed (fail closed): ${failures.join('; ')}`)

@@ -160,6 +160,30 @@ function assertReportShaMatchesAsset(metricSha, asset, label) {
   }
 }
 
+export function validateCompletedSecurityAudit(report) {
+  // 正式 combined staging 不能只复制审计文件；必须拒绝 dry-run、缺项及失败报告。
+  const labels = ['node-root-production', 'node-root-all', 'dsh-runtime', 'rust']
+  if (report?.schemaVersion !== 1 || report.status !== 'completed'
+    || !Array.isArray(report.audits) || report.audits.length !== labels.length) {
+    throw new Error('combined release staging 要求完整且 completed 的 security audit')
+  }
+  for (const label of labels) {
+    const matches = report.audits.filter(item => item?.label === label)
+    const audit = matches[0]
+    if (matches.length !== 1 || audit.status !== 'completed') {
+      throw new Error(`combined release staging security audit 子项未完成：${label}`)
+    }
+    const vulnerabilities = audit.vulnerabilities
+    const valid = label === 'rust'
+      ? vulnerabilities?.found === false && vulnerabilities.count === 0
+        && Array.isArray(vulnerabilities.list) && vulnerabilities.list.length === 0
+      : ['info', 'low', 'moderate', 'high', 'critical'].every(key =>
+        Number.isSafeInteger(vulnerabilities?.[key]) && vulnerabilities[key] >= 0)
+        && vulnerabilities.critical === 0
+    if (!valid) throw new Error(`combined release staging security audit 漏洞摘要无效或阻断：${label}`)
+  }
+}
+
 function validateCombinedPackageReport(report, assets) {
   if (report?.schemaVersion !== 3) {
     throw new Error('combined release staging 要求 schemaVersion=3 的 package report')
@@ -286,7 +310,7 @@ async function writeReleaseStaging(version, outputDirectory, stagingDirectory, o
     'package-report',
     version
   )
-  await copyJsonIfPresent(
+  const securityAudit = await copyJsonIfPresent(
     resolve(argValue('--security-audit', resolve(root, 'runtime/staging/security-audit.json'))),
     resolve(stagingDirectory, `deepshell-agent-v${version}-security-audit.json`),
     assets,
@@ -295,6 +319,7 @@ async function writeReleaseStaging(version, outputDirectory, stagingDirectory, o
   )
   if (options.validateCombinedPackageReport) {
     validateCombinedPackageReport(packageReport, assets)
+    validateCompletedSecurityAudit(securityAudit)
   }
 
   const presentAssets = assets.filter(asset => asset.status === 'present')

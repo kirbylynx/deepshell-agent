@@ -10,6 +10,8 @@ Language: English | [简体中文](roadmap.zh.md)
 >
 > **Date:** 2026-09-26
 
+> **2026-09-27 C1:** The return audit fixes change shared source inputs. W3b acceptance remains historical evidence; its assets cannot be used for the updated candidate. Windows revalidation/rebuild, final macOS regression, combined staging and publication remain pending. No feature status is promoted by this review.
+
 ## 1. Purpose
 
 This document defines DeepShell Agent's version stages, feature pool, and priorities. It explains why a version exists and which capabilities matter more, without committing ahead of time to the version in which any specific feature will start.
