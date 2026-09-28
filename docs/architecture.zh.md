@@ -58,7 +58,7 @@ DeepShell Agent 不重新实现通用 Agent Framework，也不维护平行 Web C
 
 ## 4. 系统上下文
 
-当前 `v0.1.5` 收口状态（2026-09-27 C1）：共享审计脚本修复要求重新执行 Windows 构建与证据轮次。现有 W3b 资产仅保留为历史输入，最终 macOS 回归与 combined staging 待执行；不改变架构边界，也不代表已发布跨平台版本。
+当前 `v0.1.5` 收口状态（2026-09-28 W3c）：Windows 已复验 C1 审计/staging 修复，并从 clean `e86e54d` source 重建 Windows 资产。最终 macOS 回归与 combined staging 待执行；不改变架构边界，也不代表已发布跨平台版本。
 
 ```text
 ┌──────────────┐
@@ -460,7 +460,7 @@ DSH、Node、SEA packager/patch 或 First-party Plugin 任一变化都会使 Run
 >
 > `v0.1.4` preview release 已通过平台专用 Tauri 配置与验证规则实现并独立验证两条平台路线：macOS `.app` 只包含 `darwin-arm64` Node，Windows 安装树与 portable ZIP 只包含 `win32-x64` Node。Windows 真机验收与最终 macOS C0 回归均已登记在 `docs/releases/v0.1.4.zh.md`。macOS Developer ID 签名/公证与 Windows 代码签名仍是独立的正式分发门禁。
 >
-> 当前 `v0.1.5` 分支以平台 SEA executable 替代 Standard Runtime 安装树（`REL-028`）。历史 macOS 打包、浏览器/性能/Cache 证据、用户确认的 `MAC-01`～`MAC-09`，以及 Windows W0–W3/W3b 验收已记录。此后的 macOS C1 回收审查改变共享审计输入，最终 macOS 回归与 combined staging 前必须完成 Windows 复验及 clean source 重建。详见公开的 [`v0.1.5 发布说明`](releases/v0.1.5.zh.md)。本段记录进行中的架构迁移，不代表已发布跨平台版本。
+> 当前 `v0.1.5` 分支以平台 SEA executable 替代 Standard Runtime 安装树（`REL-028`）。历史 macOS 打包、浏览器/性能/Cache 证据、用户确认的 `MAC-01`～`MAC-09`，以及 Windows W0–W3/W3b 验收已记录。macOS C1 回收审查改变了共享审计输入；Windows 随后复验这些门禁并从同一 clean commit 重建 Windows 资产（W3c）。最终 macOS 回归与 combined staging 仍待完成。详见公开的 [`v0.1.5 发布说明`](releases/v0.1.5.zh.md)。本段记录进行中的架构迁移，不代表已发布跨平台版本。
 
 ### 9.3 原子更新与迁移
 

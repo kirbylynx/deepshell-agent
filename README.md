@@ -14,7 +14,7 @@ DeepShell Agent does not reimplement the Agent Runtime and does not fork the off
 
 The latest published baseline is the unsigned `v0.1.4` preview release. It completed Windows 11 x64 on-device acceptance and the final macOS arm64 regression, and adds per-platform runtime trimming, a Windows portable ZIP, safer Windows uninstall cleanup, and platform-specific native menus while retaining DeepSeek Harness `0.1.5-rc.1`, the official Web UI, and the public-extension-point architecture.
 
-The `v0.1.5` candidate (not yet published) replaces the extracted Node.js + DSH runtime tree with a platform-specific SEA Runtime and pins DeepSeek Harness `0.1.5-rc.2`. Historical Windows W0–W3/W3b and macOS acceptance are recorded, but the macOS C1 return review fixed further shared audit-script gaps. Windows revalidation and clean-source asset rebuilding are required before final macOS closeout, combined staging or publication; the previous W3b assets are not final assets for the updated candidate. See the [v0.1.5 release notes](docs/releases/v0.1.5.md).
+The `v0.1.5` candidate (not yet published) replaces the extracted Node.js + DSH runtime tree with a platform-specific SEA Runtime and pins DeepSeek Harness `0.1.5-rc.2`. Historical Windows W0–W3/W3b and macOS acceptance are recorded, and the macOS C1 return review fixed further shared audit-script gaps. Windows then revalidated the updated audit/staging gates and rebuilt the Windows assets from the same clean commit (W3c; input digest `dc949e94…`); final macOS regression, combined staging and publication remain pending. See the [v0.1.5 release notes](docs/releases/v0.1.5.md).
 
 Capabilities already included in the source baseline:
 

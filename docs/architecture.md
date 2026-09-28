@@ -58,7 +58,7 @@ DeepShell Agent does not reimplement a general Agent Framework and does not main
 
 ## 4. System context
 
-Current `v0.1.5` closeout status (2026-09-27 C1): shared audit-script fixes require a new Windows build and evidence round. Existing W3b assets remain historical inputs only; final macOS regression and combined staging are pending. This does not change the architecture boundaries or establish a published cross-platform release.
+Current `v0.1.5` closeout status (2026-09-28 W3c): Windows revalidated the C1 audit/staging fixes and rebuilt the Windows assets from the clean `e86e54d` source. Final macOS regression and combined staging are pending. This does not change the architecture boundaries or establish a published cross-platform release.
 
 ```text
 ┌──────────────┐
@@ -472,7 +472,7 @@ Package verification must compare E2E and Release artifacts to prove test-only c
 >
 > The `v0.1.4` preview release implements and independently validates both platform paths with platform-specific Tauri configuration and verification rules. The macOS `.app` contains only `darwin-arm64` Node; the Windows installed tree and portable ZIP contain only `win32-x64` Node. Windows on-device acceptance and the final macOS C0 regression are recorded in `docs/releases/v0.1.4.md`. Developer ID signing/notarization and Windows code signing remain separate formal-distribution gates.
 >
-> The active `v0.1.5` branch replaces the installed Standard Runtime tree with a platform SEA executable (`REL-028`). Historical macOS packaging, browser/performance/cache evidence, user-confirmed `MAC-01` through `MAC-09`, and Windows W0–W3/W3b acceptance are recorded. The macOS C1 return review subsequently changed shared audit inputs, requiring Windows revalidation and clean-source rebuilding before final macOS regression or combined staging. See the public [`v0.1.5 release notes`](releases/v0.1.5.md). This is an active architecture migration, not a published cross-platform result.
+> The active `v0.1.5` branch replaces the installed Standard Runtime tree with a platform SEA executable (`REL-028`). Historical macOS packaging, browser/performance/cache evidence, user-confirmed `MAC-01` through `MAC-09`, and Windows W0–W3/W3b acceptance are recorded. The macOS C1 return review changed shared audit inputs; Windows subsequently revalidated those gates and rebuilt the Windows assets from the same clean commit (W3c). Final macOS regression and combined staging remain pending. See the public [`v0.1.5 release notes`](releases/v0.1.5.md). This is an active architecture migration, not a published cross-platform result.
 
 ### 9.4 Updates and migration
 

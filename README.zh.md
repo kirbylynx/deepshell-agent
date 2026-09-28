@@ -14,7 +14,7 @@ DeepShell Agent 不重新实现 Agent Runtime，也不 fork 官方 DSH Web UI。
 
 最新已公开发布基线为未签名的 `v0.1.4` preview release。该版本已完成 Windows 11 x64 真机验收与最终 macOS arm64 回归：新增按平台裁剪运行时、Windows portable ZIP、更安全的 Windows 卸载清理和平台原生菜单，同时继续固定使用 DeepSeek Harness `0.1.5-rc.1`，并保持官方 Web UI / 官方扩展点架构不变。
 
-`v0.1.5` 候选（尚未发布）将解压式 Node.js + DSH 运行时树替换为按平台 SEA Runtime，并固定使用 DeepSeek Harness `0.1.5-rc.2`。历史 Windows W0–W3/W3b 与 macOS 验收结果已记录，但 macOS C1 回收审查再次修复共享审计脚本缺口。最终 macOS 收口、combined staging 与发布前，必须完成 Windows 复验及 clean source 资产重建；此前 W3b 资产不是更新后候选的最终资产。详见 [v0.1.5 发布说明](docs/releases/v0.1.5.zh.md)。
+`v0.1.5` 候选（尚未发布）将解压式 Node.js + DSH 运行时树替换为按平台 SEA Runtime，并固定使用 DeepSeek Harness `0.1.5-rc.2`。历史 Windows W0–W3/W3b 与 macOS 验收结果已记录；macOS C1 回收审查再次修复共享审计脚本缺口后，Windows 已在同一 clean commit 上完成复验并重建 Windows 资产（W3c，input digest `dc949e94…`）。最终 macOS 回归、combined staging 与发布仍待完成。详见 [v0.1.5 发布说明](docs/releases/v0.1.5.zh.md)。
 
 已经纳入源码基线的能力：
 
