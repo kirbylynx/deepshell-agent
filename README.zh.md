@@ -14,7 +14,7 @@ DeepShell Agent 不重新实现 Agent Runtime，也不 fork 官方 DSH Web UI。
 
 最新已公开发布基线为未签名的 `v0.1.4` preview release。该版本已完成 Windows 11 x64 真机验收与最终 macOS arm64 回归：新增按平台裁剪运行时、Windows portable ZIP、更安全的 Windows 卸载清理和平台原生菜单，同时继续固定使用 DeepSeek Harness `0.1.5-rc.1`，并保持官方 Web UI / 官方扩展点架构不变。
 
-`v0.1.5` 候选（尚未发布）将解压式 Node.js + DSH 运行时树替换为按平台 SEA Runtime，并固定使用 DeepSeek Harness `0.1.5-rc.2`。历史 Windows W0–W3/W3b 与 macOS 验收结果已记录；macOS C1 回收审查再次修复共享审计脚本缺口后，Windows 已在同一 clean commit 上完成复验并重建 Windows 资产（W3c，input digest `dc949e94…`）。最终 macOS 回归、combined staging 与发布仍待完成。详见 [v0.1.5 发布说明](docs/releases/v0.1.5.zh.md)。
+`v0.1.5` 候选（尚未发布）将解压式 Node.js + DSH 运行时树替换为按平台 SEA Runtime，并固定使用 DeepSeek Harness `0.1.5-rc.2`。历史 Windows W0–W3c 与 macOS 验收结果已记录。C2 共享输入门禁修复使 W3c Windows 包和当前 macOS 包失效；两个平台均须最终重建，之后才能进行 combined staging 与发布。详见 [v0.1.5 发布说明](docs/releases/v0.1.5.zh.md)。
 
 已经纳入源码基线的能力：
 
@@ -107,7 +107,7 @@ Windows 用户可以选择 NSIS installer 或 portable ZIP。portable 版本解�
 
 `v0.1.4` preview release 已在真实 Windows 11 x64 上完成 WIN-01 至 WIN-13，包括安装版/便携版真实会话创建、跨形态 UI 级 Session 与 Provider 双向共享、删除 portable 目录后保留用户数据、原生菜单目视、孤儿 Sidecar 卸载清理，以及代表性 `v0.1.3` 旧会话升级。详见 [v0.1.4 收口文档](docs/releases/v0.1.4.zh.md)。
 
-`v0.1.5` 候选版本已在最终 clean rebuild 产物上完成 Windows x64 W0–W3 验收：全新安装、`v0.1.4` → `v0.1.5` 升级与 legacy 运行时清理、portable/installed 交替使用、带 SEA proxy 文件的回退、孤儿/卸载 ownership、Windows Defender 扫描、SEA on-device native cache 证据，以及真机工具复测（`read`、`write`、`edit`、`glob`、`grep`、`pwsh`）。随后 W3b 返工从 clean `6e660f3` commit 重建并重跑受影响证据（真实安全审计、`windows-preflight-pass` route check、安装/卸载回归、全新启动、on-device、report 与体积门禁）。详见 [v0.1.5 Windows 交接记录](docs/plans/v0.1.5-sea-runtime/windows-handoff.md)。
+`v0.1.5` 候选版本已在 clean rebuild 产物上完成 Windows x64 W0–W3 验收：全新安装、`v0.1.4` → `v0.1.5` 升级与 legacy 运行时清理、portable/installed 交替使用、带 SEA proxy 文件的回退、孤儿/卸载 ownership、Windows Defender 扫描、SEA on-device native cache 证据，以及真机工具复测（`read`、`write`、`edit`、`glob`、`grep`、`pwsh`）。W3b 证据卫生返工之后，W3c 又从 clean `e86e54d` commit 重建 Windows 资产，并重跑受影响的审计、安装/卸载、fresh/warm 启动、on-device、report 与体积检查。最终 combined release staging 仍被随后发现的 C2 门禁问题阻断。详见公开的 [v0.1.5 发布说明](docs/releases/v0.1.5.zh.md)。
 
 **`v0.1.3` 已在真实 Windows x64 真机上完成端到端验收**（安装向导、首次启动、数据目录、凭据配置、会话与工具、单实例、动态端口、恶意源隔离、当时覆盖的退出清理场景、崩溃恢复、诊断包、环境还原）。验收过程中发现并修复了 8 处 Windows 平台缺陷，详见 [v0.1.3 收口文档](docs/releases/v0.1.3.zh.md)。
 
@@ -121,7 +121,7 @@ Windows 用户可以选择 NSIS installer 或 portable ZIP。portable 版本解�
 
 最终 `v0.1.4` 审计中，production root、bundled DSH Runtime 与 Rust 均为零通告；root 的开发/测试工具链仍有 4 个 high 与 1 个 moderate 告警，按未进入交付 Runtime 的非阻塞构建工具告警记录。
 
-`v0.1.5` 轮次（W3b）中四项审计均对官方 registry 真实执行完成：`node-root-production`、`dsh-runtime`、`rust` 零通告；`node-root-all` 经开发/测试 WebdriverIO 工具链报告 4 个 high 与 1 个 moderate（未进入交付运行时的非阻塞构建工具告警，与 `v0.1.4` 一致）。更早的 W3 轮次曾因所配置镜像无 audit 端点而未记录 npm 侧结果，且一份单元测试覆盖了正式报告；两个缺陷均已修复——审计查询固定官方 registry、dry-run 不再写正式报告、正式非 dry-run 审计在任何子审计未真实完成时 fail closed（非零退出码）。
+`v0.1.5` W3c 轮次的四项审计均对官方 registry 真实执行完成：`node-root-production`、`dsh-runtime`、`rust` 零通告；`node-root-all` 经开发/测试 WebdriverIO 工具链报告 4 个 high 与 1 个 moderate（未进入交付运行时的非阻塞构建工具告警，与 `v0.1.4` 一致）。更早的 W3/W3b 证据卫生缺陷已修复——审计查询固定官方 registry、dry-run 不再写正式报告、正式非 dry-run 审计在任一子审计未完成时 fail closed。C2 门禁问题修复后，这些 W3c 报告属于历史证据，最终候选必须重新生成。
 
 ## 使用方式
 

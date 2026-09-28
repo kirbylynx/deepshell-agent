@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { describe, expect, it } from 'vitest'
+import { platformInputDigest } from '../../scripts/lib/source-inputs.mjs'
 
 const execFileAsync = promisify(execFile)
 const root = resolve(import.meta.dirname, '../..')
@@ -20,11 +21,30 @@ function sha256Text(value: string) {
   return createHash('sha256').update(value).digest('hex')
 }
 
-function completedSecurityAudit(version: string) {
+function releaseEvidenceIdentity(version: string, overrides: Record<string, unknown> = {}) {
+  return {
+    schemaVersion: 1,
+    status: 'present',
+    source: 'package-report',
+    application: { name: 'DeepShell Agent', version },
+    platform: 'darwin-arm64',
+    sourceInputSha256: '1'.repeat(64),
+    artifactSourceCommit: '2'.repeat(40),
+    seaRuntime: {
+      sha256: '3'.repeat(64),
+      bytes: 1234,
+      provisional: false,
+    },
+    ...overrides,
+  }
+}
+
+function completedSecurityAudit(version: string, identity = releaseEvidenceIdentity(version)) {
   return {
     schemaVersion: 1,
     application: { name: 'DeepShell Agent', version },
     status: 'completed',
+    releaseEvidenceIdentity: identity,
     audits: ['node-root-production', 'node-root-all', 'dsh-runtime', 'rust'].map(label => ({
       label,
       status: 'completed',
@@ -35,12 +55,217 @@ function completedSecurityAudit(version: string) {
   }
 }
 
+function licenseInventory(version: string, identity = releaseEvidenceIdentity(version)) {
+  return {
+    schemaVersion: 1,
+    application: { name: 'DeepShell Agent', version },
+    releaseEvidenceIdentity: identity,
+    bundledNode: { version: '24.20.0' },
+    bundledDshNpmPackages: [
+      { name: '@deepseek-ai/dsh', version: '0.1.5-rc.2', license: 'MIT', installed: true, optional: false },
+      { name: '@img/sharp-darwin-arm64', version: '0.34.4', license: 'Apache-2.0', installed: false, optional: true },
+    ],
+    embeddedSeaPackager: { name: '@yao-pkg/pkg', version: '6.22.0' },
+    directBuildAndTestNpmPackages: [
+      { name: '@yao-pkg/pkg', version: '6.22.0', license: 'MIT', scope: 'embedded-sea-bootstrap' },
+    ],
+    rustRegistryPackages: [
+      { name: 'tauri', version: '2.8.5', license: 'MIT OR Apache-2.0', source: 'registry+https://github.com/rust-lang/crates.io-index' },
+    ],
+  }
+}
+
+async function authoritativeLicenseInventory(version: string, identity = releaseEvidenceIdentity(version)) {
+  // @ts-expect-error 该 CLI 脚本同时导出 release 收口 guard 供聚焦测试使用。
+  const { collectExpectedLicenseInventoryPayload } = await import('../../scripts/release-staging.mjs')
+  return {
+    schemaVersion: 1,
+    application: { name: 'DeepShell Agent', version },
+    releaseEvidenceIdentity: identity,
+    ...await collectExpectedLicenseInventoryPayload(),
+  }
+}
+
+function sbomComponentsFromLicense(inventory: Record<string, any>) {
+  return [
+    { name: inventory.application.name, version: inventory.application.version, type: 'application', license: 'MIT', scope: 'root' },
+    { name: 'Bundled Node.js', version: inventory.bundledNode.version, type: 'runtime', license: 'Node.js bundled licenses', scope: 'bundled-runtime' },
+    ...inventory.bundledDshNpmPackages.map((pkg: Record<string, any>) => ({
+      name: pkg.name,
+      version: pkg.version,
+      type: 'npm',
+      license: pkg.license ?? 'UNDECLARED',
+      scope: 'bundled-dsh-runtime',
+      optional: pkg.optional === true,
+      installed: pkg.installed === true,
+    })),
+    ...inventory.directBuildAndTestNpmPackages.map((pkg: Record<string, any>) => ({
+      name: pkg.name,
+      version: pkg.version,
+      type: 'npm',
+      license: pkg.license ?? 'UNDECLARED',
+      scope: pkg.scope,
+    })),
+    ...inventory.rustRegistryPackages.map((pkg: Record<string, any>) => ({
+      name: pkg.name,
+      version: pkg.version,
+      type: 'cargo',
+      license: pkg.license ?? 'UNDECLARED',
+      scope: 'tauri-runtime',
+    })),
+  ].sort((left, right) => `${left.type}:${left.name}:${left.version}`.localeCompare(`${right.type}:${right.name}:${right.version}`))
+}
+
+function sbomBaseline(version: string, identity = releaseEvidenceIdentity(version), inventory: Record<string, any> = licenseInventory(version, identity)) {
+  const components = sbomComponentsFromLicense(inventory)
+  return {
+    schemaVersion: 1,
+    format: 'deepshell-sbom-baseline',
+    application: { name: 'DeepShell Agent', version },
+    releaseEvidenceIdentity: identity,
+    source: 'license-inventory',
+    componentCount: components.length,
+    components,
+  }
+}
+
+function removeNonAnchorDependency(inventory: Record<string, any>) {
+  const next = structuredClone(inventory)
+  const dshIndex = next.bundledDshNpmPackages.findIndex((pkg: Record<string, any>) => pkg.name !== '@deepseek-ai/dsh')
+  if (dshIndex >= 0) {
+    next.bundledDshNpmPackages.splice(dshIndex, 1)
+    return next
+  }
+  const directIndex = next.directBuildAndTestNpmPackages.findIndex((pkg: Record<string, any>) => pkg.name !== '@yao-pkg/pkg')
+  if (directIndex >= 0) {
+    next.directBuildAndTestNpmPackages.splice(directIndex, 1)
+    return next
+  }
+  next.rustRegistryPackages.splice(0, 1)
+  return next
+}
+
+function replaceOneDuplicateSbomComponent(sbom: Record<string, any>) {
+  const next = structuredClone(sbom)
+  const counts = new Map<string, number>()
+  for (const component of next.components) {
+    counts.set(componentKeyForTest(component), (counts.get(componentKeyForTest(component)) ?? 0) + 1)
+  }
+  const index = next.components.findIndex((component: Record<string, any>) =>
+    component.type === 'npm' && (counts.get(componentKeyForTest(component)) ?? 0) > 1)
+  if (index < 0) throw new Error('测试夹具缺少重复 SBOM component')
+  next.components[index] = {
+    ...next.components[index],
+    name: `${next.components[index].name}-forged`,
+    version: '0.0.0',
+  }
+  return next
+}
+
+function componentKeyForTest(component: Record<string, any>) {
+  return [
+    component?.type ?? '',
+    component?.name ?? '',
+    component?.version ?? '',
+    component?.scope ?? '',
+    component?.license ?? '',
+    component?.optional === true ? 'optional' : '',
+    component?.installed === true ? 'installed' : component?.installed === false ? 'not-installed' : '',
+  ].join('\0')
+}
+
+function runtimeFromIdentity(identity: Record<string, any>) {
+  return {
+    format: 'sea',
+    platform: identity.platform,
+    provisional: identity.seaRuntime.provisional,
+    sourceInputSha256: identity.sourceInputSha256,
+    artifactSourceCommit: identity.artifactSourceCommit,
+    executable: {
+      sha256: identity.seaRuntime.sha256,
+      bytes: identity.seaRuntime.bytes,
+    },
+  }
+}
+
+function windowsProvenance(version: string, options: {
+  artifactSourceCommit: string
+  windowsSourceInputSha256: string
+  installerSha256: string
+  installerBytes: number
+  portableSha256: string
+  portableBytes: number
+  seaSha256?: string
+  seaBytes?: number
+  origin?: string
+  round?: string
+  windowsAcceptance?: Record<string, unknown> | null
+}) {
+  const round = options.round ?? 'w3c'
+  return {
+    schemaVersion: 1,
+    version,
+    platform: 'win32-x64',
+    origin: options.origin ?? 'windows-local',
+    round,
+    ...(options.windowsAcceptance === null
+      ? {}
+      : { windowsAcceptance: options.windowsAcceptance ?? { status: 'accepted-on-device', round } }),
+    artifactSourceCommit: options.artifactSourceCommit,
+    windowsSourceInputSha256: options.windowsSourceInputSha256,
+    seaRuntime: {
+      sha256: options.seaSha256 ?? '6'.repeat(64),
+      bytes: options.seaBytes ?? 4321,
+      provisional: false,
+    },
+    artifacts: [
+      {
+        path: `artifacts/DeepShell Agent_${version}_x64-setup.exe`,
+        bytes: options.installerBytes,
+        sha256: options.installerSha256,
+      },
+      {
+        path: `artifacts/DeepShell.Agent_${version}_x64-portable.zip`,
+        bytes: options.portableBytes,
+        sha256: options.portableSha256,
+      },
+    ],
+  }
+}
+
 function combinedPackageReport(version: string, shas: {
   dmg: string
   installer: string
   portable: string
-}, options: { omitInstalledTree?: boolean, portableShaOverride?: string, provisional?: boolean } = {}) {
-  const runtime = { provisional: options.provisional ?? false }
+  dmgBytes?: number
+  installerBytes?: number
+  portableBytes?: number
+}, options: {
+  omitInstalledTree?: boolean
+  portableShaOverride?: string
+  provisional?: boolean
+  macIdentity?: Record<string, any>
+  windowsSourceInputSha256?: string
+  windowsArtifactSourceCommit?: string
+  windowsSeaSha256?: string
+  windowsSeaBytes?: number
+} = {}) {
+  const macIdentity = options.macIdentity ?? releaseEvidenceIdentity(version)
+  const runtime = {
+    ...runtimeFromIdentity(macIdentity),
+    provisional: options.provisional ?? macIdentity.seaRuntime.provisional,
+  }
+  const windowsRuntime = {
+    format: 'sea',
+    platform: 'win32-x64',
+    provisional: false,
+    sourceInputSha256: options.windowsSourceInputSha256 ?? '4'.repeat(64),
+    artifactSourceCommit: options.windowsArtifactSourceCommit ?? '5'.repeat(40),
+    executable: {
+      sha256: options.windowsSeaSha256 ?? '6'.repeat(64),
+      bytes: options.windowsSeaBytes ?? 4321,
+    },
+  }
   return {
     schemaVersion: 3,
     application: { name: 'DeepShell Agent', version },
@@ -49,20 +274,24 @@ function combinedPackageReport(version: string, shas: {
     firstRunFootprint: { status: 'present', total: { files: 100, bytes: 1_000, allocatedBytes: 2_000 } },
     assets: {
       app: { status: 'present' },
-      dmg: { status: 'present', sha256: shas.dmg },
-      windowsInstaller: { status: 'present', sha256: shas.installer },
+      dmg: { status: 'present', sha256: shas.dmg, bytes: shas.dmgBytes ?? 3 },
+      windowsInstaller: { status: 'present', sha256: shas.installer, bytes: shas.installerBytes ?? 9 },
       ...(options.omitInstalledTree ? {} : { windowsInstalledTree: { status: 'present' } }),
       windowsPortable: {
         status: 'present',
-        archive: { status: 'present', sha256: options.portableShaOverride ?? shas.portable },
+        archive: {
+          status: 'present',
+          sha256: options.portableShaOverride ?? shas.portable,
+          bytes: shas.portableBytes ?? 8,
+        },
       },
     },
     manifests: {
-      releasePackageManifest: { status: 'present', runtime },
-      releaseDmgManifest: { status: 'present', runtime },
-      releaseWindowsNsisManifest: { status: 'present', runtime },
-      releaseWindowsInstalledTreeManifest: { status: 'present', runtime },
-      releasePortableManifest: { status: 'present', runtime },
+      releasePackageManifest: { status: 'present', schemaVersion: 6, artifactKind: 'macos-app', runtime },
+      releaseDmgManifest: { status: 'present', schemaVersion: 6, artifactKind: 'macos-dmg', runtime },
+      releaseWindowsNsisManifest: { status: 'present', schemaVersion: 6, artifactKind: 'nsis-installer', runtime: windowsRuntime },
+      releaseWindowsInstalledTreeManifest: { status: 'present', schemaVersion: 6, artifactKind: 'windows-installed-tree', runtime: windowsRuntime },
+      releasePortableManifest: { status: 'present', schemaVersion: 6, artifactKind: 'windows-portable', runtime: windowsRuntime },
     },
   }
 }
@@ -624,25 +853,75 @@ describe('v0.1.1 release hardening scripts', () => {
   it('combined release staging 校验 package report 的指标、manifest summary 和资产 sha', async () => {
     const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-combined-report-'))
     try {
-      const version = '0.1.4'
+      const version = '0.1.5'
+      const windowsSourceInputSha256 = await platformInputDigest(root, 'win32-x64')
+      const macosSourceInputSha256 = await platformInputDigest(root, 'darwin-arm64')
+      const { stdout: head } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: root })
+      const artifactSourceCommit = head.trim()
+      const macIdentity = releaseEvidenceIdentity(version, { artifactSourceCommit, sourceInputSha256: macosSourceInputSha256 })
       const output = resolve(temporary, 'release')
-      const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
-      const installer = resolve(temporary, 'DeepShell Agent_0.1.4_x64-setup.exe')
-      const portable = resolve(temporary, 'DeepShell.Agent_0.1.4_x64-portable.zip')
-      const support = resolve(temporary, 'support.json')
+      const dmg = resolve(temporary, `DeepShell Agent_${version}_aarch64.dmg`)
+      const installer = resolve(temporary, `DeepShell Agent_${version}_x64-setup.exe`)
+      const portable = resolve(temporary, `DeepShell.Agent_${version}_x64-portable.zip`)
+      const license = resolve(temporary, 'license.json')
+      const sbom = resolve(temporary, 'sbom.json')
+      const security = resolve(temporary, 'security-audit.json')
+      const emptyLicense = resolve(temporary, 'empty-license.json')
+      const sbomMissingDsh = resolve(temporary, 'sbom-missing-dsh.json')
+      const sbomMissingRust = resolve(temporary, 'sbom-missing-rust.json')
+      const macLicenseMissingDependency = resolve(temporary, 'mac-license-missing-dependency.json')
+      const macSbomMissingDependency = resolve(temporary, 'mac-sbom-missing-dependency.json')
+      const windowsLicenseMissingDependency = resolve(temporary, 'windows-license-missing-dependency.json')
+      const windowsSbomMissingDependency = resolve(temporary, 'windows-sbom-missing-dependency.json')
+      const sbomDuplicateReplaced = resolve(temporary, 'sbom-duplicate-replaced.json')
+      const windowsLicense = resolve(temporary, 'windows-license.json')
+      const windowsSbom = resolve(temporary, 'windows-sbom.json')
+      const windowsSecurity = resolve(temporary, 'windows-security-audit.json')
       const report = resolve(temporary, 'package-report.json')
+      const provenance = resolve(temporary, 'windows-provenance.json')
       await writeFile(dmg, 'dmg')
       await writeFile(installer, 'installer')
       await writeFile(portable, 'portable')
-      await writeFile(support, JSON.stringify(completedSecurityAudit(version)))
+      const windowsIdentity = releaseEvidenceIdentity(version, {
+        platform: 'win32-x64',
+        sourceInputSha256: windowsSourceInputSha256,
+        artifactSourceCommit,
+        seaRuntime: { sha256: '6'.repeat(64), bytes: 4321, provisional: false },
+      })
+      const macLicenseInventory = await authoritativeLicenseInventory(version, macIdentity)
+      const macSbom = sbomBaseline(version, macIdentity, macLicenseInventory)
+      const windowsLicenseInventory = await authoritativeLicenseInventory(version, windowsIdentity)
+      const windowsSbomInventory = sbomBaseline(version, windowsIdentity, windowsLicenseInventory)
+      await writeFile(license, JSON.stringify(macLicenseInventory))
+      await writeFile(sbom, JSON.stringify(macSbom))
+      await writeFile(security, JSON.stringify(completedSecurityAudit(version, macIdentity)))
+      await writeFile(windowsLicense, JSON.stringify(windowsLicenseInventory))
+      await writeFile(windowsSbom, JSON.stringify(windowsSbomInventory))
+      await writeFile(windowsSecurity, JSON.stringify(completedSecurityAudit(version, windowsIdentity)))
       await writeFile(report, JSON.stringify({
         ...combinedPackageReport(version, {
           dmg: sha256Text('dmg'),
           installer: sha256Text('installer'),
           portable: sha256Text('portable'),
+          dmgBytes: 3,
+          installerBytes: 9,
+          portableBytes: 8,
+        }, {
+          macIdentity,
+          windowsSourceInputSha256,
+          windowsArtifactSourceCommit: artifactSourceCommit,
         }),
         application: { name: 'DeepShell Agent', version },
       }))
+      await writeFile(provenance, JSON.stringify(windowsProvenance(version, {
+        artifactSourceCommit,
+        windowsSourceInputSha256,
+        installerSha256: sha256Text('installer'),
+        installerBytes: 9,
+        portableSha256: sha256Text('portable'),
+        portableBytes: 8,
+        round: 'w3d',
+      })))
 
       await runNode([
         'scripts/release-staging.mjs',
@@ -652,33 +931,163 @@ describe('v0.1.1 release hardening scripts', () => {
         '--windows-installer', installer,
         '--windows-portable', portable,
         '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
-        '--license-inventory', support,
-        '--sbom', support,
+        '--license-inventory', license,
+        '--sbom', sbom,
         '--package-report', report,
-        '--security-audit', support,
+        '--security-audit', security,
+        '--windows-provenance', provenance,
+        '--windows-license-inventory', windowsLicense,
+        '--windows-sbom', windowsSbom,
+        '--windows-security-audit', windowsSecurity,
       ])
 
       const manifest = JSON.parse(await readFile(resolve(output, 'release-manifest.json'), 'utf8'))
+      const notes = await readFile(resolve(output, 'RELEASE_NOTES.md'), 'utf8')
       expect(manifest.assets.find((asset: { label: string }) => asset.label === 'package-report').status).toBe('present')
-      expect(await readFile(resolve(output, 'DeepShell.Agent_0.1.4_x64-portable.zip'), 'utf8')).toBe('portable')
+      expect(await readFile(resolve(output, `DeepShell.Agent_${version}_x64-portable.zip`), 'utf8')).toBe('portable')
+      expect(manifest.windowsStatusCode).toBe('accepted-on-device')
+      expect(manifest.windowsAcceptanceRound).toBe('w3d')
+      expect(manifest.windowsAcceptanceOrigin).toBe('windows-local')
+      expect(manifest.windowsAcceptanceRecord).toBe(`deepshell-agent-v${version}-windows-provenance.json`)
+      expect(manifest.windowsStatusSummary).toContain('w3d')
+      expect(notes).toContain(`accepted-on-device by windows-local provenance round w3d for v${version}`)
+      expect(notes).not.toContain('no Windows on-device acceptance is recorded')
 
       // F-1505-C1-003：沿用完整 report/资产，但正式审计失败时必须拒绝替换已存在的快照。
       const originalManifest = await readFile(resolve(output, 'release-manifest.json'), 'utf8')
-      const failedAudit = completedSecurityAudit(version)
+      const failedAudit = completedSecurityAudit(version, macIdentity)
       failedAudit.status = 'incomplete'
-      await writeFile(support, JSON.stringify(failedAudit))
+      await writeFile(security, JSON.stringify(failedAudit))
       await expect(runNode([
         'scripts/release-staging.mjs', '--version', version, '--output-dir', output,
         '--dmg', dmg, '--windows-installer', installer, '--windows-portable', portable,
         '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
-        '--license-inventory', support, '--sbom', support, '--package-report', report,
-        '--security-audit', support,
+        '--license-inventory', license, '--sbom', sbom, '--package-report', report,
+        '--security-audit', security,
+        '--windows-provenance', provenance,
+        '--windows-license-inventory', windowsLicense,
+        '--windows-sbom', windowsSbom,
+        '--windows-security-audit', windowsSecurity,
       ])).rejects.toThrow(/security audit/)
+      expect(await readFile(resolve(output, 'release-manifest.json'), 'utf8')).toBe(originalManifest)
+
+      await writeFile(security, JSON.stringify(completedSecurityAudit(version, macIdentity)))
+      await writeFile(emptyLicense, JSON.stringify({
+        ...macLicenseInventory,
+        bundledDshNpmPackages: [],
+        directBuildAndTestNpmPackages: [],
+        rustRegistryPackages: [],
+      }))
+      await expect(runNode([
+        'scripts/release-staging.mjs', '--version', version, '--output-dir', output,
+        '--dmg', dmg, '--windows-installer', installer, '--windows-portable', portable,
+        '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
+        '--license-inventory', emptyLicense, '--sbom', sbom, '--package-report', report,
+        '--security-audit', security,
+        '--windows-provenance', provenance,
+        '--windows-license-inventory', windowsLicense,
+        '--windows-sbom', windowsSbom,
+        '--windows-security-audit', windowsSecurity,
+      ])).rejects.toThrow(/依赖覆盖不完整/)
+      expect(await readFile(resolve(output, 'release-manifest.json'), 'utf8')).toBe(originalManifest)
+
+      const missingDshSbom = sbomBaseline(version, macIdentity, macLicenseInventory)
+      const dshComponentIndex = missingDshSbom.components.findIndex(component => component.name === '@deepseek-ai/dsh')
+      missingDshSbom.components[dshComponentIndex] = {
+        name: '@deepseek-ai/not-dsh',
+        version: '0.0.0',
+        type: 'npm',
+        license: 'MIT',
+        scope: 'bundled-dsh-runtime',
+        optional: false,
+        installed: true,
+      }
+      await writeFile(sbomMissingDsh, JSON.stringify(missingDshSbom))
+      await expect(runNode([
+        'scripts/release-staging.mjs', '--version', version, '--output-dir', output,
+        '--dmg', dmg, '--windows-installer', installer, '--windows-portable', portable,
+        '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
+        '--license-inventory', license, '--sbom', sbomMissingDsh, '--package-report', report,
+        '--security-audit', security,
+        '--windows-provenance', provenance,
+        '--windows-license-inventory', windowsLicense,
+        '--windows-sbom', windowsSbom,
+        '--windows-security-audit', windowsSecurity,
+      ])).rejects.toThrow(/权威依赖覆盖不一致/)
+      expect(await readFile(resolve(output, 'release-manifest.json'), 'utf8')).toBe(originalManifest)
+
+      const missingRustSbom = sbomBaseline(version, macIdentity, macLicenseInventory)
+      const rustComponentIndex = missingRustSbom.components.findIndex(component => component.type === 'cargo')
+      missingRustSbom.components[rustComponentIndex] = {
+        name: 'fake-rust-crate',
+        version: '0.0.0',
+        type: 'cargo',
+        license: 'MIT',
+        scope: 'tauri-runtime',
+      }
+      await writeFile(sbomMissingRust, JSON.stringify(missingRustSbom))
+      await expect(runNode([
+        'scripts/release-staging.mjs', '--version', version, '--output-dir', output,
+        '--dmg', dmg, '--windows-installer', installer, '--windows-portable', portable,
+        '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
+        '--license-inventory', license, '--sbom', sbomMissingRust, '--package-report', report,
+        '--security-audit', security,
+        '--windows-provenance', provenance,
+        '--windows-license-inventory', windowsLicense,
+        '--windows-sbom', windowsSbom,
+        '--windows-security-audit', windowsSecurity,
+      ])).rejects.toThrow(/权威依赖覆盖不一致/)
+      expect(await readFile(resolve(output, 'release-manifest.json'), 'utf8')).toBe(originalManifest)
+
+      const macMissingDependencyLicense = removeNonAnchorDependency(macLicenseInventory)
+      await writeFile(macLicenseMissingDependency, JSON.stringify(macMissingDependencyLicense))
+      await writeFile(macSbomMissingDependency, JSON.stringify(sbomBaseline(version, macIdentity, macMissingDependencyLicense)))
+      await expect(runNode([
+        'scripts/release-staging.mjs', '--version', version, '--output-dir', output,
+        '--dmg', dmg, '--windows-installer', installer, '--windows-portable', portable,
+        '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
+        '--license-inventory', macLicenseMissingDependency, '--sbom', macSbomMissingDependency, '--package-report', report,
+        '--security-audit', security,
+        '--windows-provenance', provenance,
+        '--windows-license-inventory', windowsLicense,
+        '--windows-sbom', windowsSbom,
+        '--windows-security-audit', windowsSecurity,
+      ])).rejects.toThrow(/macOS license inventory.*权威依赖覆盖不一致/)
+      expect(await readFile(resolve(output, 'release-manifest.json'), 'utf8')).toBe(originalManifest)
+
+      const windowsMissingDependencyLicense = removeNonAnchorDependency(windowsLicenseInventory)
+      await writeFile(windowsLicenseMissingDependency, JSON.stringify(windowsMissingDependencyLicense))
+      await writeFile(windowsSbomMissingDependency, JSON.stringify(sbomBaseline(version, windowsIdentity, windowsMissingDependencyLicense)))
+      await expect(runNode([
+        'scripts/release-staging.mjs', '--version', version, '--output-dir', output,
+        '--dmg', dmg, '--windows-installer', installer, '--windows-portable', portable,
+        '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
+        '--license-inventory', license, '--sbom', sbom, '--package-report', report,
+        '--security-audit', security,
+        '--windows-provenance', provenance,
+        '--windows-license-inventory', windowsLicenseMissingDependency,
+        '--windows-sbom', windowsSbomMissingDependency,
+        '--windows-security-audit', windowsSecurity,
+      ])).rejects.toThrow(/Windows license inventory.*权威依赖覆盖不一致/)
+      expect(await readFile(resolve(output, 'release-manifest.json'), 'utf8')).toBe(originalManifest)
+
+      await writeFile(sbomDuplicateReplaced, JSON.stringify(replaceOneDuplicateSbomComponent(macSbom)))
+      await expect(runNode([
+        'scripts/release-staging.mjs', '--version', version, '--output-dir', output,
+        '--dmg', dmg, '--windows-installer', installer, '--windows-portable', portable,
+        '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
+        '--license-inventory', license, '--sbom', sbomDuplicateReplaced, '--package-report', report,
+        '--security-audit', security,
+        '--windows-provenance', provenance,
+        '--windows-license-inventory', windowsLicense,
+        '--windows-sbom', windowsSbom,
+        '--windows-security-audit', windowsSecurity,
+      ])).rejects.toThrow(/macOS SBOM.*权威依赖覆盖不一致/)
       expect(await readFile(resolve(output, 'release-manifest.json'), 'utf8')).toBe(originalManifest)
     } finally {
       await rm(temporary, { recursive: true, force: true })
     }
-  })
+  }, 20_000)
 
   it('combined staging 对真实审计摘要 fail closed，保留非 critical 工具警告', async () => {
     // @ts-expect-error 该 CLI 导出审计 guard 供聚焦测试使用。
@@ -704,28 +1113,125 @@ describe('v0.1.1 release hardening scripts', () => {
     expect(() => validateCompletedSecurityAudit(warning)).not.toThrow()
   })
 
+  it('direct npm license inventory 生成前拒绝 node_modules 版本漂移', async () => {
+    // @ts-expect-error 该 helper 是 JS 脚本模块，供 release 证据测试注入临时仓库。
+    const { collectDirectBuildAndTestNpmPackages } = await import('../../scripts/lib/direct-npm-dependencies.mjs')
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-direct-npm-drift-'))
+    try {
+      await writeFile(resolve(temporary, 'package.json'), JSON.stringify({
+        dependencies: { foo: '1.0.0' },
+        devDependencies: { '@scope/bar': '2.0.0' },
+      }))
+      await writeFile(resolve(temporary, 'pnpm-lock.yaml'), [
+        "lockfileVersion: '9.0'",
+        '',
+        'importers:',
+        '',
+        '  .:',
+        '    dependencies:',
+        '      foo:',
+        '        specifier: 1.0.0',
+        '        version: 1.0.0',
+        '    devDependencies:',
+        "      '@scope/bar':",
+        '        specifier: 2.0.0',
+        '        version: 2.0.0',
+        '',
+      ].join('\n'))
+      await mkdir(resolve(temporary, 'node_modules/foo'), { recursive: true })
+      await mkdir(resolve(temporary, 'node_modules/@scope/bar'), { recursive: true })
+      await writeFile(resolve(temporary, 'node_modules/foo/package.json'), JSON.stringify({
+        name: 'foo',
+        version: '1.0.0',
+        license: 'MIT',
+      }))
+      await writeFile(resolve(temporary, 'node_modules/@scope/bar/package.json'), JSON.stringify({
+        name: '@scope/bar',
+        version: '2.0.0',
+        license: 'Apache-2.0',
+      }))
+
+      await expect(collectDirectBuildAndTestNpmPackages(temporary)).resolves.toEqual([
+        { name: '@scope/bar', version: '2.0.0', license: 'Apache-2.0', scope: 'build-or-test-only' },
+        { name: 'foo', version: '1.0.0', license: 'MIT', scope: 'build-and-runtime-client' },
+      ])
+
+      await writeFile(resolve(temporary, 'node_modules/foo/package.json'), JSON.stringify({
+        name: 'foo',
+        version: '1.0.1',
+        license: 'MIT',
+      }))
+      await expect(collectDirectBuildAndTestNpmPackages(temporary)).rejects.toThrow(/版本漂移/)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
   it('combined release staging 拒绝不完整或哈希不匹配的 package report', async () => {
     const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-combined-report-fail-'))
     try {
       const version = '0.1.4'
+      const windowsSourceInputSha256 = await platformInputDigest(root, 'win32-x64')
+      const macosSourceInputSha256 = await platformInputDigest(root, 'darwin-arm64')
+      const { stdout: head } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: root })
+      const artifactSourceCommit = head.trim()
+      const macIdentity = releaseEvidenceIdentity(version, { artifactSourceCommit, sourceInputSha256: macosSourceInputSha256 })
       const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
       const installer = resolve(temporary, 'DeepShell Agent_0.1.4_x64-setup.exe')
       const portable = resolve(temporary, 'DeepShell.Agent_0.1.4_x64-portable.zip')
-      const support = resolve(temporary, 'support.json')
+      const license = resolve(temporary, 'license.json')
+      const sbom = resolve(temporary, 'sbom.json')
+      const security = resolve(temporary, 'security-audit.json')
+      const windowsLicense = resolve(temporary, 'windows-license.json')
+      const windowsSbom = resolve(temporary, 'windows-sbom.json')
+      const windowsSecurity = resolve(temporary, 'windows-security-audit.json')
+      const provenance = resolve(temporary, 'windows-provenance.json')
       const incompleteReport = resolve(temporary, 'incomplete-report.json')
       const mismatchedReport = resolve(temporary, 'mismatched-report.json')
       const shas = {
         dmg: sha256Text('dmg'),
         installer: sha256Text('installer'),
         portable: sha256Text('portable'),
+        dmgBytes: 3,
+        installerBytes: 9,
+        portableBytes: 8,
       }
       await writeFile(dmg, 'dmg')
       await writeFile(installer, 'installer')
       await writeFile(portable, 'portable')
-      await writeFile(support, `{"application":{"version":"${version}"}}\n`)
-      await writeFile(incompleteReport, JSON.stringify(combinedPackageReport(version, shas, { omitInstalledTree: true })))
+      const windowsIdentity = releaseEvidenceIdentity(version, {
+        platform: 'win32-x64',
+        sourceInputSha256: windowsSourceInputSha256,
+        artifactSourceCommit,
+        seaRuntime: { sha256: '6'.repeat(64), bytes: 4321, provisional: false },
+      })
+      const macLicenseInventory = await authoritativeLicenseInventory(version, macIdentity)
+      const windowsLicenseInventory = await authoritativeLicenseInventory(version, windowsIdentity)
+      await writeFile(license, JSON.stringify(macLicenseInventory))
+      await writeFile(sbom, JSON.stringify(sbomBaseline(version, macIdentity, macLicenseInventory)))
+      await writeFile(security, JSON.stringify(completedSecurityAudit(version, macIdentity)))
+      await writeFile(windowsLicense, JSON.stringify(windowsLicenseInventory))
+      await writeFile(windowsSbom, JSON.stringify(sbomBaseline(version, windowsIdentity, windowsLicenseInventory)))
+      await writeFile(windowsSecurity, JSON.stringify(completedSecurityAudit(version, windowsIdentity)))
+      await writeFile(provenance, JSON.stringify(windowsProvenance(version, {
+        artifactSourceCommit,
+        windowsSourceInputSha256,
+        installerSha256: shas.installer,
+        installerBytes: shas.installerBytes,
+        portableSha256: shas.portable,
+        portableBytes: shas.portableBytes,
+      })))
+      await writeFile(incompleteReport, JSON.stringify(combinedPackageReport(version, shas, {
+        omitInstalledTree: true,
+        macIdentity,
+        windowsSourceInputSha256,
+        windowsArtifactSourceCommit: artifactSourceCommit,
+      })))
       await writeFile(mismatchedReport, JSON.stringify(combinedPackageReport(version, shas, {
         portableShaOverride: '0'.repeat(64),
+        macIdentity,
+        windowsSourceInputSha256,
+        windowsArtifactSourceCommit: artifactSourceCommit,
       })))
 
       const baseArgs = [
@@ -735,9 +1241,13 @@ describe('v0.1.1 release hardening scripts', () => {
         '--windows-installer', installer,
         '--windows-portable', portable,
         '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
-        '--license-inventory', support,
-        '--sbom', support,
-        '--security-audit', support,
+        '--license-inventory', license,
+        '--sbom', sbom,
+        '--security-audit', security,
+        '--windows-provenance', provenance,
+        '--windows-license-inventory', windowsLicense,
+        '--windows-sbom', windowsSbom,
+        '--windows-security-audit', windowsSecurity,
       ]
       await expect(runNode([
         ...baseArgs,
@@ -758,21 +1268,61 @@ describe('v0.1.1 release hardening scripts', () => {
     const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-provisional-'))
     try {
       const version = '0.1.4'
+      const windowsSourceInputSha256 = await platformInputDigest(root, 'win32-x64')
+      const macosSourceInputSha256 = await platformInputDigest(root, 'darwin-arm64')
+      const { stdout: head } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: root })
+      const artifactSourceCommit = head.trim()
+      const macIdentity = releaseEvidenceIdentity(version, { artifactSourceCommit, sourceInputSha256: macosSourceInputSha256 })
       const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
       const installer = resolve(temporary, 'DeepShell Agent_0.1.4_x64-setup.exe')
       const portable = resolve(temporary, 'DeepShell.Agent_0.1.4_x64-portable.zip')
-      const support = resolve(temporary, 'support.json')
+      const license = resolve(temporary, 'license.json')
+      const sbom = resolve(temporary, 'sbom.json')
+      const security = resolve(temporary, 'security-audit.json')
+      const windowsLicense = resolve(temporary, 'windows-license.json')
+      const windowsSbom = resolve(temporary, 'windows-sbom.json')
+      const windowsSecurity = resolve(temporary, 'windows-security-audit.json')
       const report = resolve(temporary, 'package-report.json')
+      const provenance = resolve(temporary, 'windows-provenance.json')
       await writeFile(dmg, 'dmg')
       await writeFile(installer, 'installer')
       await writeFile(portable, 'portable')
-      await writeFile(support, `{"application":{"version":"${version}"}}\n`)
+      const windowsIdentity = releaseEvidenceIdentity(version, {
+        platform: 'win32-x64',
+        sourceInputSha256: windowsSourceInputSha256,
+        artifactSourceCommit,
+        seaRuntime: { sha256: '6'.repeat(64), bytes: 4321, provisional: false },
+      })
+      const macLicenseInventory = await authoritativeLicenseInventory(version, macIdentity)
+      const windowsLicenseInventory = await authoritativeLicenseInventory(version, windowsIdentity)
+      await writeFile(license, JSON.stringify(macLicenseInventory))
+      await writeFile(sbom, JSON.stringify(sbomBaseline(version, macIdentity, macLicenseInventory)))
+      await writeFile(security, JSON.stringify(completedSecurityAudit(version, macIdentity)))
+      await writeFile(windowsLicense, JSON.stringify(windowsLicenseInventory))
+      await writeFile(windowsSbom, JSON.stringify(sbomBaseline(version, windowsIdentity, windowsLicenseInventory)))
+      await writeFile(windowsSecurity, JSON.stringify(completedSecurityAudit(version, windowsIdentity)))
+      await writeFile(provenance, JSON.stringify(windowsProvenance(version, {
+        artifactSourceCommit,
+        windowsSourceInputSha256,
+        installerSha256: sha256Text('installer'),
+        installerBytes: 9,
+        portableSha256: sha256Text('portable'),
+        portableBytes: 8,
+      })))
       await writeFile(report, JSON.stringify({
         ...combinedPackageReport(version, {
           dmg: sha256Text('dmg'),
           installer: sha256Text('installer'),
           portable: sha256Text('portable'),
-        }, { provisional: true }),
+          dmgBytes: 3,
+          installerBytes: 9,
+          portableBytes: 8,
+        }, {
+          provisional: true,
+          macIdentity,
+          windowsSourceInputSha256,
+          windowsArtifactSourceCommit: artifactSourceCommit,
+        }),
         application: { name: 'DeepShell Agent', version },
       }))
 
@@ -784,11 +1334,214 @@ describe('v0.1.1 release hardening scripts', () => {
         '--windows-installer', installer,
         '--windows-portable', portable,
         '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
-        '--license-inventory', support,
-        '--sbom', support,
+        '--license-inventory', license,
+        '--sbom', sbom,
         '--package-report', report,
-        '--security-audit', support,
+        '--security-audit', security,
+        '--windows-provenance', provenance,
+        '--windows-license-inventory', windowsLicense,
+        '--windows-sbom', windowsSbom,
+        '--windows-security-audit', windowsSecurity,
       ])).rejects.toThrow(/provisional Runtime/)
+    } finally {
+      await rm(temporary, { recursive: true, force: true })
+    }
+  })
+
+  it('combined release staging 要求 Windows-local provenance 和三份支持证据 SEA 身份一致', async () => {
+    const temporary = await mkdtemp(resolve(tmpdir(), 'deepshell-stage-provenance-identity-'))
+    try {
+      const version = '0.1.4'
+      const windowsSourceInputSha256 = await platformInputDigest(root, 'win32-x64')
+      const macosSourceInputSha256 = await platformInputDigest(root, 'darwin-arm64')
+      const { stdout: head } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: root })
+      const artifactSourceCommit = head.trim()
+      const macIdentity = releaseEvidenceIdentity(version, { artifactSourceCommit, sourceInputSha256: macosSourceInputSha256 })
+      const shas = {
+        dmg: sha256Text('dmg'),
+        installer: sha256Text('installer'),
+        portable: sha256Text('portable'),
+        dmgBytes: 3,
+        installerBytes: 9,
+        portableBytes: 8,
+      }
+      const dmg = resolve(temporary, 'DeepShell Agent_0.1.4_aarch64.dmg')
+      const installer = resolve(temporary, 'DeepShell Agent_0.1.4_x64-setup.exe')
+      const portable = resolve(temporary, 'DeepShell.Agent_0.1.4_x64-portable.zip')
+      const license = resolve(temporary, 'license.json')
+      const sbom = resolve(temporary, 'sbom.json')
+      const security = resolve(temporary, 'security-audit.json')
+      const auditAsLicense = resolve(temporary, 'audit-as-license.json')
+      const windowsLicense = resolve(temporary, 'windows-license.json')
+      const windowsSbom = resolve(temporary, 'windows-sbom.json')
+      const windowsSecurity = resolve(temporary, 'windows-security-audit.json')
+      const staleWindowsLicense = resolve(temporary, 'stale-windows-license.json')
+      const staleSupport = resolve(temporary, 'stale-support.json')
+      const report = resolve(temporary, 'package-report.json')
+      const provenance = resolve(temporary, 'windows-provenance.json')
+      const ciProvenance = resolve(temporary, 'ci-provenance.json')
+      const staleProvenance = resolve(temporary, 'stale-provenance.json')
+      const noAcceptanceProvenance = resolve(temporary, 'no-acceptance-provenance.json')
+      await writeFile(dmg, 'dmg')
+      await writeFile(installer, 'installer')
+      await writeFile(portable, 'portable')
+      const windowsIdentity = releaseEvidenceIdentity(version, {
+        platform: 'win32-x64',
+        sourceInputSha256: windowsSourceInputSha256,
+        artifactSourceCommit,
+        seaRuntime: { sha256: '6'.repeat(64), bytes: 4321, provisional: false },
+      })
+      const macLicenseInventory = await authoritativeLicenseInventory(version, macIdentity)
+      const windowsLicenseInventory = await authoritativeLicenseInventory(version, windowsIdentity)
+      await writeFile(license, JSON.stringify(macLicenseInventory))
+      await writeFile(sbom, JSON.stringify(sbomBaseline(version, macIdentity, macLicenseInventory)))
+      await writeFile(security, JSON.stringify(completedSecurityAudit(version, macIdentity)))
+      await writeFile(auditAsLicense, JSON.stringify(completedSecurityAudit(version, macIdentity)))
+      await writeFile(windowsLicense, JSON.stringify(windowsLicenseInventory))
+      await writeFile(windowsSbom, JSON.stringify(sbomBaseline(version, windowsIdentity, windowsLicenseInventory)))
+      await writeFile(windowsSecurity, JSON.stringify(completedSecurityAudit(version, windowsIdentity)))
+      await writeFile(staleSupport, JSON.stringify(await authoritativeLicenseInventory(version, {
+        ...macIdentity,
+        sourceInputSha256: '0'.repeat(64),
+      })))
+      await writeFile(staleWindowsLicense, JSON.stringify(await authoritativeLicenseInventory(version, {
+        ...windowsIdentity,
+        sourceInputSha256: 'f'.repeat(64),
+      })))
+      await writeFile(report, JSON.stringify(combinedPackageReport(version, shas, {
+        macIdentity,
+        windowsSourceInputSha256,
+        windowsArtifactSourceCommit: artifactSourceCommit,
+      })))
+      await writeFile(provenance, JSON.stringify(windowsProvenance(version, {
+        artifactSourceCommit,
+        windowsSourceInputSha256,
+        installerSha256: shas.installer,
+        installerBytes: shas.installerBytes,
+        portableSha256: shas.portable,
+        portableBytes: shas.portableBytes,
+      })))
+      await writeFile(ciProvenance, JSON.stringify(windowsProvenance(version, {
+        artifactSourceCommit,
+        windowsSourceInputSha256,
+        installerSha256: shas.installer,
+        installerBytes: shas.installerBytes,
+        portableSha256: shas.portable,
+        portableBytes: shas.portableBytes,
+        origin: 'ci-artifact',
+      })))
+      await writeFile(staleProvenance, JSON.stringify(windowsProvenance(version, {
+        artifactSourceCommit,
+        windowsSourceInputSha256: 'f'.repeat(64),
+        installerSha256: shas.installer,
+        installerBytes: shas.installerBytes,
+        portableSha256: shas.portable,
+        portableBytes: shas.portableBytes,
+      })))
+      await writeFile(noAcceptanceProvenance, JSON.stringify(windowsProvenance(version, {
+        artifactSourceCommit,
+        windowsSourceInputSha256,
+        installerSha256: shas.installer,
+        installerBytes: shas.installerBytes,
+        portableSha256: shas.portable,
+        portableBytes: shas.portableBytes,
+        windowsAcceptance: null,
+      })))
+
+      const baseArgs = [
+        'scripts/release-staging.mjs',
+        '--version', version,
+        '--dmg', dmg,
+        '--windows-installer', installer,
+        '--windows-portable', portable,
+        '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
+        '--license-inventory', license,
+        '--sbom', sbom,
+        '--package-report', report,
+        '--security-audit', security,
+      ]
+      const windowsSupportArgs = [
+        '--windows-license-inventory', windowsLicense,
+        '--windows-sbom', windowsSbom,
+        '--windows-security-audit', windowsSecurity,
+      ]
+      await expect(runNode([
+        'scripts/release-staging.mjs',
+        '--version', version,
+        '--dmg', dmg,
+        '--windows-installer-dir', temporary,
+        '--windows-portable', portable,
+        '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
+        '--license-inventory', license,
+        '--sbom', sbom,
+        '--package-report', report,
+        '--security-audit', security,
+        '--windows-provenance', provenance,
+        ...windowsSupportArgs,
+        '--output-dir', resolve(temporary, 'release-missing-explicit-installer'),
+      ])).rejects.toThrow(/显式 --windows-installer/)
+      await expect(runNode([
+        'scripts/release-staging.mjs',
+        '--version', version,
+        '--dmg', dmg,
+        '--windows-installer', installer,
+        '--windows-portable-dir', temporary,
+        '--require-assets', 'macos-dmg,windows-nsis,windows-portable',
+        '--license-inventory', license,
+        '--sbom', sbom,
+        '--package-report', report,
+        '--security-audit', security,
+        '--windows-provenance', provenance,
+        ...windowsSupportArgs,
+        '--output-dir', resolve(temporary, 'release-missing-explicit-portable'),
+      ])).rejects.toThrow(/显式 --windows-portable/)
+      await expect(runNode([
+        ...baseArgs,
+        '--output-dir', resolve(temporary, 'release-missing-provenance'),
+      ])).rejects.toThrow(/windows-provenance/)
+      await expect(runNode([
+        ...baseArgs,
+        '--output-dir', resolve(temporary, 'release-missing-windows-support'),
+        '--windows-provenance', provenance,
+      ])).rejects.toThrow(/--windows-license-inventory/)
+      await expect(runNode([
+        ...baseArgs,
+        '--output-dir', resolve(temporary, 'release-ci-provenance'),
+        '--windows-provenance', ciProvenance,
+        ...windowsSupportArgs,
+      ])).rejects.toThrow(/origin\/version\/platform\/round/)
+      await expect(runNode([
+        ...baseArgs,
+        '--output-dir', resolve(temporary, 'release-stale-provenance'),
+        '--windows-provenance', staleProvenance,
+        ...windowsSupportArgs,
+      ])).rejects.toThrow(/source input digest/)
+      await expect(runNode([
+        ...baseArgs,
+        '--output-dir', resolve(temporary, 'release-no-acceptance'),
+        '--windows-provenance', noAcceptanceProvenance,
+        ...windowsSupportArgs,
+      ])).rejects.toThrow(/accepted-on-device/)
+      await expect(runNode([
+        ...baseArgs.map(value => value === license ? staleSupport : value),
+        '--output-dir', resolve(temporary, 'release-stale-support'),
+        '--windows-provenance', provenance,
+        ...windowsSupportArgs,
+      ])).rejects.toThrow(/license-inventory.*SEA 身份/)
+      await expect(runNode([
+        ...baseArgs.map(value => value === license ? auditAsLicense : value),
+        '--output-dir', resolve(temporary, 'release-audit-as-license'),
+        '--windows-provenance', provenance,
+        ...windowsSupportArgs,
+      ])).rejects.toThrow(/license inventory/)
+      await expect(runNode([
+        ...baseArgs,
+        '--output-dir', resolve(temporary, 'release-stale-windows-license'),
+        '--windows-provenance', provenance,
+        '--windows-license-inventory', staleWindowsLicense,
+        '--windows-sbom', windowsSbom,
+        '--windows-security-audit', windowsSecurity,
+      ])).rejects.toThrow(/Windows license-inventory.*SEA 身份/)
     } finally {
       await rm(temporary, { recursive: true, force: true })
     }
@@ -1052,8 +1805,10 @@ describe('v0.1.1 release hardening scripts', () => {
     try {
       const inventory = resolve(temporary, 'license-inventory.json')
       const output = resolve(temporary, 'sbom.json')
+      const identity = releaseEvidenceIdentity('0.1.1-test')
       await writeFile(inventory, JSON.stringify({
         application: { name: 'DeepShell Agent', version: '0.1.1-test' },
+        releaseEvidenceIdentity: identity,
         bundledNode: { version: '24.20.0' },
         bundledDshNpmPackages: [{ name: '@deepseek-ai/dsh', version: '0.1.5-rc.1', license: 'MIT', installed: true }],
         directBuildAndTestNpmPackages: [],
@@ -1062,10 +1817,22 @@ describe('v0.1.1 release hardening scripts', () => {
       await runNode(['scripts/generate-sbom.mjs', '--input', inventory, '--output', output, '--expected-version', '0.1.1-test'])
       const sbom = JSON.parse(await readFile(output, 'utf8'))
       expect(sbom.format).toBe('deepshell-sbom-baseline')
+      expect(sbom.releaseEvidenceIdentity).toEqual(identity)
       expect(sbom.components.some((component: { name: string }) => component.name === '@deepseek-ai/dsh')).toBe(true)
     } finally {
       await rm(temporary, { recursive: true, force: true })
     }
+  })
+
+  it('License/SBOM/Security 三个证据生成器都写入 releaseEvidenceIdentity 字段', async () => {
+    const [licenses, sbom, security] = await Promise.all([
+      readFile(resolve(root, 'scripts/collect-licenses.mjs'), 'utf8'),
+      readFile(resolve(root, 'scripts/generate-sbom.mjs'), 'utf8'),
+      readFile(resolve(root, 'scripts/security-audit.mjs'), 'utf8'),
+    ])
+    expect(licenses).toContain('releaseEvidenceIdentity: await collectReleaseEvidenceIdentity')
+    expect(sbom).toContain('releaseEvidenceIdentity: inventory.releaseEvidenceIdentity')
+    expect(security).toContain('releaseEvidenceIdentity: await collectReleaseEvidenceIdentity')
   })
 
   it.each([
@@ -1179,6 +1946,7 @@ describe('v0.1.1 release hardening scripts', () => {
       await runNode(['scripts/security-audit.mjs', '--dry-run', '--output', auditOutput])
       const audit = JSON.parse(await readFile(auditOutput, 'utf8'))
       expect(audit.status).toBe('dry-run')
+      expect(audit.releaseEvidenceIdentity.schemaVersion).toBe(1)
       expect(audit.audits.every((item: { status: string }) => item.status === 'dry-run')).toBe(true)
 
       const routeOutput = resolve(temporary, 'windows-route-check.json')

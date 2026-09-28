@@ -4,6 +4,7 @@ import { dirname, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { root } from './lib/runtime.mjs'
 import { redactedJson } from './lib/redaction.mjs'
+import { collectReleaseEvidenceIdentity } from './lib/release-evidence-identity.mjs'
 
 const execFileAsync = promisify(execFile)
 
@@ -172,6 +173,7 @@ const report = {
   application: { name: 'DeepShell Agent', version: pkg.version },
   generatedAt: new Date().toISOString(),
   status,
+  releaseEvidenceIdentity: await collectReleaseEvidenceIdentity({ root, expectedVersion: pkg.version }),
   gatePolicy: {
     critical: 'failure',
     high: 'warning unless runtime code execution, credential leak, or sandbox bypass',

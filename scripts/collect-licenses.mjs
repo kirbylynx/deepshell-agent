@@ -2,6 +2,8 @@ import { execFileSync } from 'node:child_process'
 import { access, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { readLock, root } from './lib/runtime.mjs'
+import { collectReleaseEvidenceIdentity } from './lib/release-evidence-identity.mjs'
+import { collectDirectBuildAndTestNpmPackages } from './lib/direct-npm-dependencies.mjs'
 
 async function exists(path) {
   try {
@@ -36,19 +38,7 @@ runtimePackages.sort((left, right) =>
 )
 
 const rootPackage = JSON.parse(await readFile(resolve(root, 'package.json'), 'utf8'))
-const directNames = [...Object.keys(rootPackage.dependencies ?? {}), ...Object.keys(rootPackage.devDependencies ?? {})]
-const buildPackages = []
-for (const name of [...new Set(directNames)].sort()) {
-  const manifest = JSON.parse(await readFile(resolve(root, 'node_modules', name, 'package.json'), 'utf8'))
-  buildPackages.push({
-    name,
-    version: manifest.version,
-    license: manifest.license ?? 'UNDECLARED',
-    scope: name === '@yao-pkg/pkg'
-      ? 'embedded-sea-bootstrap'
-      : rootPackage.dependencies?.[name] ? 'build-and-runtime-client' : 'build-or-test-only'
-  })
-}
+const buildPackages = await collectDirectBuildAndTestNpmPackages(root)
 
 const cargo = JSON.parse(execFileSync('cargo', [
   'metadata',
@@ -71,6 +61,7 @@ const rustPackages = cargo.packages
 const output = {
   schemaVersion: 1,
   application: { name: 'DeepShell Agent', version: rootPackage.version },
+  releaseEvidenceIdentity: await collectReleaseEvidenceIdentity({ root, expectedVersion: rootPackage.version }),
   bundledNode: {
     version: lock.node.version,
     distributionLicensePath: 'licenses/Node.js-LICENSE',

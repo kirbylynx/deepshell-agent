@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { dirname, resolve } from 'node:path'
 import { root } from './lib/runtime.mjs'
 import { redactedJson } from './lib/redaction.mjs'
+import { collectReleaseEvidenceIdentity } from './lib/release-evidence-identity.mjs'
 
 function argValue(name, fallback) {
   const prefix = `${name}=`
@@ -75,6 +76,8 @@ const sbom = {
   format: 'deepshell-sbom-baseline',
   generatedAt: new Date().toISOString(),
   application: inventory.application,
+  releaseEvidenceIdentity: inventory.releaseEvidenceIdentity ??
+    await collectReleaseEvidenceIdentity({ root, expectedVersion }),
   source: 'license-inventory',
   componentCount: components.length,
   components,

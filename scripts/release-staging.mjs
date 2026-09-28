@@ -1,9 +1,17 @@
-import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { access, copyFile, mkdir, mkdtemp, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, relative, resolve, sep } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { root, sha256 } from './lib/runtime.mjs'
+import { promisify } from 'node:util'
+import { readLock, root, sha256 } from './lib/runtime.mjs'
 import { redactedJson } from './lib/redaction.mjs'
-import { windowsManifestFields, windowsNotesLine } from './lib/windows-acceptance.mjs'
+import { platformInputDigest } from './lib/source-inputs.mjs'
+import {
+  assertReleaseEvidenceIdentityMatchesExpected,
+  assertReleaseEvidenceIdentityMatchesReport,
+} from './lib/release-evidence-identity.mjs'
+import { WindowsStatusCode, windowsManifestFields, windowsNotesLine } from './lib/windows-acceptance.mjs'
+import { collectDirectBuildAndTestNpmPackages } from './lib/direct-npm-dependencies.mjs'
 import {
   assertArtifactNameMatchesVersion,
   isMacosDmgName,
@@ -14,12 +22,18 @@ import {
   selectWindowsPortableZipName,
 } from './lib/artifact-selection.mjs'
 
+const execFileAsync = promisify(execFile)
+
 function argValue(name, fallback) {
   const prefix = `${name}=`
   const inline = process.argv.find(value => value.startsWith(prefix))
   if (inline) return inline.slice(prefix.length)
   const index = process.argv.indexOf(name)
   return index >= 0 ? process.argv[index + 1] : fallback
+}
+
+function hasArg(name) {
+  return process.argv.some(value => value === name || value.startsWith(`${name}=`))
 }
 
 function explicitArgValue(name) {
@@ -120,8 +134,9 @@ async function copyJsonIfPresent(source, target, assets, label, version) {
   }
   const content = await readFile(source, 'utf8')
   const json = JSON.parse(content)
-  if (json.application?.version !== version) {
-    throw new Error(`${label} 版本不一致：expected ${version}, got ${json.application?.version ?? 'unknown'}`)
+  const actualVersion = json.application?.version ?? json.version
+  if (actualVersion !== version) {
+    throw new Error(`${label} 版本不一致：expected ${version}, got ${actualVersion ?? 'unknown'}`)
   }
   await writeFile(target, content)
   assets.push({ label, status: 'present', asset: basename(target), sha256: await sha256(target) })
@@ -160,6 +175,40 @@ function assertReportShaMatchesAsset(metricSha, asset, label) {
   }
 }
 
+function assertReportFileMetricMatchesAsset(metric, asset, label) {
+  assertReportShaMatchesAsset(metric.sha256, asset, label)
+  if (metric.bytes !== asset.bytes) {
+    throw new Error(`combined release staging 的 package report ${label} bytes 与 staging 资产不一致`)
+  }
+}
+
+function assertExplicitCombinedInput(name) {
+  const input = explicitArgValue(name)
+  if (!input.explicit || typeof input.value !== 'string' || input.value.trim() === '' || input.value.startsWith('--')) {
+    throw new Error(`combined release staging 要求显式 ${name}`)
+  }
+}
+
+function windowsReleaseMetadataFromProvenance(version, provenance) {
+  const record = provenance.windowsAcceptance?.record ??
+    `deepshell-agent-v${version}-windows-provenance.json`
+  const round = provenance.round
+  const summary = `accepted-on-device by ${provenance.origin} provenance round ${round}`
+  const scope = `v${version}: accepted-on-device from ${provenance.origin} provenance round ${round}`
+  return {
+    notesLine:
+      `- Windows x64: ${summary} for v${version} (see ${record}). Known unfixed defects ship with this version: recorded in Windows provenance.`,
+    manifestFields: {
+      windowsStatusCode: WindowsStatusCode.AcceptedOnDevice,
+      windowsStatusSummary: summary,
+      windowsAcceptanceRecord: record,
+      windowsAcceptanceScope: scope,
+      windowsAcceptanceOrigin: provenance.origin,
+      windowsAcceptanceRound: round,
+    },
+  }
+}
+
 export function validateCompletedSecurityAudit(report) {
   // 正式 combined staging 不能只复制审计文件；必须拒绝 dry-run、缺项及失败报告。
   const labels = ['node-root-production', 'node-root-all', 'dsh-runtime', 'rust']
@@ -184,7 +233,405 @@ export function validateCompletedSecurityAudit(report) {
   }
 }
 
-function validateCombinedPackageReport(report, assets) {
+function assertSupportEvidenceIdentities(report, evidence) {
+  for (const [label, value] of Object.entries(evidence)) {
+    assertReleaseEvidenceIdentityMatchesReport(value, report, label)
+  }
+}
+
+function packageNameFromLockPath(path, value) {
+  return value.name ?? path.split('node_modules/').at(-1)
+}
+
+function dshPackageCoverageKey(pkg) {
+  return [
+    pkg?.name ?? '',
+    pkg?.version ?? '',
+    pkg?.license ?? '',
+    pkg?.optional === true ? 'optional' : 'required',
+  ].join('\0')
+}
+
+function directPackageCoverageKey(pkg) {
+  return [
+    pkg?.name ?? '',
+    pkg?.version ?? '',
+    pkg?.license ?? 'UNDECLARED',
+    pkg?.scope ?? '',
+  ].join('\0')
+}
+
+function rustPackageCoverageKey(pkg) {
+  return [
+    pkg?.name ?? '',
+    pkg?.version ?? '',
+    pkg?.license ?? 'UNDECLARED',
+    pkg?.source ?? '',
+  ].join('\0')
+}
+
+function multiset(values, keyOf) {
+  const counts = new Map()
+  for (const value of values) {
+    const key = keyOf(value)
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  }
+  return counts
+}
+
+function assertSameMultiset(actualItems, expectedItems, keyOf, label, describeItem) {
+  const actual = multiset(actualItems, keyOf)
+  const expected = multiset(expectedItems, keyOf)
+  for (const [key, count] of expected) {
+    const actualCount = actual.get(key) ?? 0
+    if (actualCount !== count) {
+      throw new Error(`combined release staging 的 ${label} 权威依赖覆盖不一致：缺少或数量不符 ${describeItem(key)}，expected ${count}, got ${actualCount}`)
+    }
+  }
+  for (const [key, count] of actual) {
+    const expectedCount = expected.get(key) ?? 0
+    if (expectedCount !== count) {
+      throw new Error(`combined release staging 的 ${label} 权威依赖覆盖不一致：存在非权威依赖 ${describeItem(key)}，expected ${expectedCount}, got ${count}`)
+    }
+  }
+}
+
+let expectedLicenseInventoryPayloadPromise
+
+export async function collectExpectedLicenseInventoryPayload() {
+  if (expectedLicenseInventoryPayloadPromise) return expectedLicenseInventoryPayloadPromise
+  expectedLicenseInventoryPayloadPromise = (async () => {
+    const runtimeLock = JSON.parse(
+      await readFile(resolve(root, 'runtime/manifest/dsh-install/package-lock.json'), 'utf8')
+    )
+    const lock = await readLock()
+    const bundledDshNpmPackages = []
+    for (const [path, value] of Object.entries(runtimeLock.packages ?? {})) {
+      if (!path) continue
+      bundledDshNpmPackages.push({
+        name: packageNameFromLockPath(path, value),
+        version: value.version,
+        license: value.license,
+        installed: await exists(resolve(root, 'runtime/dsh', path)),
+        optional: value.optional === true,
+      })
+    }
+    bundledDshNpmPackages.sort((left, right) =>
+      left.name.localeCompare(right.name) || left.version.localeCompare(right.version)
+    )
+
+    const directBuildAndTestNpmPackages = await collectDirectBuildAndTestNpmPackages(root)
+
+    const { stdout } = await execFileAsync('cargo', [
+      'metadata',
+      '--locked',
+      '--format-version',
+      '1',
+      '--manifest-path',
+      resolve(root, 'src-tauri/Cargo.toml'),
+    ], { cwd: root, maxBuffer: 64 * 1024 * 1024 })
+    const cargo = JSON.parse(stdout)
+    const rustRegistryPackages = cargo.packages
+      .filter(pkg => pkg.source !== null)
+      .map(pkg => ({
+        name: pkg.name,
+        version: pkg.version,
+        license: pkg.license ?? 'UNDECLARED',
+        source: pkg.source,
+      }))
+      .sort((left, right) => left.name.localeCompare(right.name) || left.version.localeCompare(right.version))
+
+    return {
+      bundledNode: {
+        version: lock.node.version,
+        distributionLicensePath: 'licenses/Node.js-LICENSE',
+        licenseFiles: Object.fromEntries(
+          Object.keys(lock.node.targets).map(target => [target, `runtime/node/${target}/LICENSE`])
+        ),
+      },
+      bundledDshNpmPackages,
+      embeddedSeaPackager: {
+        name: lock.sea.packager.package,
+        version: lock.sea.packager.version,
+        patchSha256: lock.sea.packager.patch.sha256,
+        distributionLicensePath: 'licenses/yao-pkg-LICENSE',
+      },
+      directBuildAndTestNpmPackages,
+      rustRegistryPackages,
+    }
+  })()
+  return expectedLicenseInventoryPayloadPromise
+}
+
+async function validateLicenseInventory(report, label) {
+  if (report?.schemaVersion !== 1 || report.application?.name !== 'DeepShell Agent' ||
+      typeof report.application?.version !== 'string' ||
+      typeof report.bundledNode?.version !== 'string' ||
+      !Array.isArray(report.bundledDshNpmPackages) ||
+      !Array.isArray(report.directBuildAndTestNpmPackages) ||
+      !Array.isArray(report.rustRegistryPackages) ||
+      report.embeddedSeaPackager?.name !== '@yao-pkg/pkg') {
+    throw new Error(`combined release staging 的 ${label} 不是有效 license inventory`)
+  }
+  if (report.bundledDshNpmPackages.length === 0 ||
+      !report.bundledDshNpmPackages.some(pkg => pkg?.name === '@deepseek-ai/dsh' && pkg.installed === true) ||
+      report.directBuildAndTestNpmPackages.length === 0 ||
+      !report.directBuildAndTestNpmPackages.some(pkg => pkg?.name === '@yao-pkg/pkg') ||
+      report.rustRegistryPackages.length === 0) {
+    throw new Error(`combined release staging 的 ${label} 依赖覆盖不完整`)
+  }
+  const expected = await collectExpectedLicenseInventoryPayload()
+  if (report.bundledNode.version !== expected.bundledNode.version ||
+      report.embeddedSeaPackager.version !== expected.embeddedSeaPackager.version ||
+      report.embeddedSeaPackager.patchSha256 !== expected.embeddedSeaPackager.patchSha256) {
+    throw new Error(`combined release staging 的 ${label} 权威依赖覆盖不一致：Node 或 SEA packager 身份不匹配`)
+  }
+  assertSameMultiset(
+    report.bundledDshNpmPackages,
+    expected.bundledDshNpmPackages,
+    dshPackageCoverageKey,
+    label,
+    key => `DSH npm ${key.split('\0').slice(0, 2).join('@')}`,
+  )
+  for (const pkg of report.bundledDshNpmPackages) {
+    if (pkg.optional !== true && pkg.installed !== true) {
+      throw new Error(`combined release staging 的 ${label} 权威依赖覆盖不一致：非 optional DSH 包未安装 ${pkg.name}@${pkg.version}`)
+    }
+    if (typeof pkg.installed !== 'boolean') {
+      throw new Error(`combined release staging 的 ${label} 权威依赖覆盖不一致：DSH 包缺少 installed 布尔值 ${pkg.name}@${pkg.version}`)
+    }
+  }
+  assertSameMultiset(
+    report.directBuildAndTestNpmPackages,
+    expected.directBuildAndTestNpmPackages,
+    directPackageCoverageKey,
+    label,
+    key => `direct npm ${key.split('\0').slice(0, 2).join('@')}`,
+  )
+  assertSameMultiset(
+    report.rustRegistryPackages,
+    expected.rustRegistryPackages,
+    rustPackageCoverageKey,
+    label,
+    key => `cargo ${key.split('\0').slice(0, 2).join('@')}`,
+  )
+}
+
+function componentKey(component) {
+  return [
+    component?.type ?? '',
+    component?.name ?? '',
+    component?.version ?? '',
+    component?.scope ?? '',
+    component?.license ?? '',
+    component?.optional === true ? 'optional' : '',
+    component?.installed === true ? 'installed' : component?.installed === false ? 'not-installed' : '',
+  ].join('\0')
+}
+
+function expectedSbomComponentsFromLicense(inventory) {
+  return [
+    {
+      name: inventory.application.name,
+      version: inventory.application.version,
+      type: 'application',
+      license: 'MIT',
+      scope: 'root',
+    },
+    {
+      name: 'Bundled Node.js',
+      version: inventory.bundledNode.version,
+      type: 'runtime',
+      license: 'Node.js bundled licenses',
+      scope: 'bundled-runtime',
+    },
+    ...inventory.bundledDshNpmPackages.map(pkg => ({
+      name: pkg.name,
+      version: pkg.version,
+      type: 'npm',
+      license: pkg.license ?? 'UNDECLARED',
+      scope: 'bundled-dsh-runtime',
+      optional: pkg.optional === true,
+      installed: pkg.installed === true,
+    })),
+    ...inventory.directBuildAndTestNpmPackages.map(pkg => ({
+      name: pkg.name,
+      version: pkg.version,
+      type: 'npm',
+      license: pkg.license ?? 'UNDECLARED',
+      scope: pkg.scope,
+    })),
+    ...inventory.rustRegistryPackages.map(pkg => ({
+      name: pkg.name,
+      version: pkg.version,
+      type: 'cargo',
+      license: pkg.license ?? 'UNDECLARED',
+      scope: 'tauri-runtime',
+    })),
+  ]
+}
+
+function validateSbom(report, label) {
+  if (report?.schemaVersion !== 1 || report.format !== 'deepshell-sbom-baseline' ||
+      report.application?.name !== 'DeepShell Agent' ||
+      typeof report.application?.version !== 'string' ||
+      report.source !== 'license-inventory' ||
+      !Number.isSafeInteger(report.componentCount) || report.componentCount < 1 ||
+      !Array.isArray(report.components) || report.components.length !== report.componentCount ||
+      !report.components.some(component => component?.type === 'application' && component.name === 'DeepShell Agent')) {
+    throw new Error(`combined release staging 的 ${label} 不是有效 SBOM`)
+  }
+}
+
+function validateSbomMatchesLicense(sbom, licenseInventory, label) {
+  const expected = expectedSbomComponentsFromLicense(licenseInventory)
+  if (sbom.componentCount !== expected.length || sbom.components.length !== expected.length) {
+    throw new Error(`combined release staging 的 ${label} component count 与 license inventory 不一致`)
+  }
+  assertSameMultiset(
+    sbom.components,
+    expected,
+    componentKey,
+    label,
+    key => key.split('\0').slice(0, 3).join(':'),
+  )
+}
+
+function expectedIdentityFromRuntime(runtime, version, label) {
+  if (runtime?.format !== 'sea' || !['darwin-arm64', 'win32-x64'].includes(runtime.platform) ||
+      runtime.provisional !== false || typeof version !== 'string' ||
+      typeof runtime.sourceInputSha256 !== 'string' || typeof runtime.artifactSourceCommit !== 'string' ||
+      !Number.isSafeInteger(runtime.executable?.bytes) || typeof runtime.executable?.sha256 !== 'string') {
+    throw new Error(`combined release staging 的 ${label} 缺少可绑定的 SEA 身份`)
+  }
+  return {
+    schemaVersion: 1,
+    status: 'present',
+    source: 'package-report',
+    application: { name: 'DeepShell Agent', version },
+    platform: runtime.platform,
+    sourceInputSha256: runtime.sourceInputSha256,
+    artifactSourceCommit: runtime.artifactSourceCommit,
+    seaRuntime: {
+      sha256: runtime.executable.sha256,
+      bytes: runtime.executable.bytes,
+      provisional: runtime.provisional,
+    },
+  }
+}
+
+async function validateSupportEvidenceGroup(evidence, expectedIdentity, prefix) {
+  await validateLicenseInventory(evidence.licenseInventory, `${prefix} license inventory`)
+  validateSbom(evidence.sbom, `${prefix} SBOM`)
+  validateSbomMatchesLicense(evidence.sbom, evidence.licenseInventory, `${prefix} SBOM`)
+  validateCompletedSecurityAudit(evidence.securityAudit)
+  assertReleaseEvidenceIdentityMatchesExpected(evidence.licenseInventory, expectedIdentity, `${prefix} license-inventory`)
+  assertReleaseEvidenceIdentityMatchesExpected(evidence.sbom, expectedIdentity, `${prefix} sbom`)
+  assertReleaseEvidenceIdentityMatchesExpected(evidence.securityAudit, expectedIdentity, `${prefix} security-audit`)
+}
+
+function artifactForAsset(provenance, asset, expectedBasenames) {
+  const artifacts = Array.isArray(provenance.artifacts) ? provenance.artifacts : []
+  return artifacts.find(item => expectedBasenames.includes(basename(item.path ?? '')) &&
+    item.sha256 === asset.sha256 && item.bytes === asset.bytes)
+}
+
+async function assertCommitIsHeadAncestor(commit, label = 'artifactSourceCommit') {
+  if (!/^[0-9a-f]{40}$/.test(commit ?? '')) {
+    throw new Error(`combined release staging 的 ${label} 缺少有效 artifactSourceCommit`)
+  }
+  try {
+    await execFileAsync('git', ['merge-base', '--is-ancestor', commit, 'HEAD'], { cwd: root })
+  } catch {
+    throw new Error(`combined release staging 的 ${label} 不是当前 HEAD 祖先`)
+  }
+}
+
+async function validateWindowsProvenance(provenance, report, assets, version) {
+  if (provenance === null) {
+    throw new Error('combined release staging 要求显式 --windows-provenance')
+  }
+  if (provenance.schemaVersion !== 1 || provenance.origin !== 'windows-local' ||
+      provenance.version !== version || provenance.platform !== 'win32-x64' ||
+      typeof provenance.round !== 'string' || !/^w\d+[a-z]?$/i.test(provenance.round)) {
+    throw new Error('combined release staging 的 Windows provenance origin/version/platform/round 无效')
+  }
+  if (provenance.windowsAcceptance?.status !== 'accepted-on-device' ||
+      provenance.windowsAcceptance?.round !== provenance.round) {
+    throw new Error('combined release staging 要求 Windows provenance 记录 accepted-on-device 真机验收')
+  }
+  await assertCommitIsHeadAncestor(provenance.artifactSourceCommit, 'Windows artifactSourceCommit')
+  const windowsSourceInputSha256 = await platformInputDigest(root, 'win32-x64')
+  if (provenance.windowsSourceInputSha256 !== windowsSourceInputSha256) {
+    throw new Error('combined release staging 的 Windows provenance source input digest 已过期')
+  }
+  if (provenance.seaRuntime?.provisional !== false ||
+      provenance.seaRuntime?.sha256 !== report.manifests?.releaseWindowsNsisManifest?.runtime?.executable?.sha256 ||
+      provenance.seaRuntime?.bytes !== report.manifests?.releaseWindowsNsisManifest?.runtime?.executable?.bytes) {
+    throw new Error('combined release staging 的 Windows provenance SEA 身份与 manifest 不一致')
+  }
+
+  for (const [key, artifactKind] of [
+    ['releaseWindowsNsisManifest', 'nsis-installer'],
+    ['releaseWindowsInstalledTreeManifest', 'windows-installed-tree'],
+    ['releasePortableManifest', 'windows-portable'],
+  ]) {
+    const summary = report.manifests?.[key]
+    const runtime = summary?.runtime
+    if (summary?.status !== 'present' || summary.schemaVersion !== 6 || summary.artifactKind !== artifactKind ||
+        runtime?.format !== 'sea' || runtime.platform !== 'win32-x64' || runtime.provisional !== false ||
+        runtime.sourceInputSha256 !== windowsSourceInputSha256 ||
+        runtime.artifactSourceCommit !== provenance.artifactSourceCommit ||
+        runtime.executable?.sha256 !== provenance.seaRuntime.sha256 ||
+        runtime.executable?.bytes !== provenance.seaRuntime.bytes) {
+      throw new Error(`combined release staging 的 Windows ${artifactKind} manifest 与 provenance/source digest 不一致`)
+    }
+  }
+
+  for (const [assetLabel, metric, label] of [
+    ['windows-nsis', report.assets?.windowsInstaller, 'Windows NSIS'],
+    ['windows-portable', report.assets?.windowsPortable?.archive, 'Windows portable ZIP'],
+  ]) {
+    const asset = presentAsset(assets, assetLabel)
+    const expectedBasenames = assetLabel === 'windows-nsis'
+      ? [asset.asset, asset.asset.replace(/^DeepShell\.Agent_/, 'DeepShell Agent_')]
+      : [asset.asset]
+    const provenanceArtifact = artifactForAsset(provenance, asset, expectedBasenames)
+    if (!provenanceArtifact ||
+        provenanceArtifact.sha256 !== asset.sha256 || provenanceArtifact.bytes !== asset.bytes ||
+        metric?.sha256 !== asset.sha256 || metric?.bytes !== asset.bytes) {
+      throw new Error(`combined release staging 的 ${label} 资产与 Windows provenance/package report 不一致`)
+    }
+  }
+}
+
+async function validateMacosCombinedIdentity(report) {
+  const macosSourceInputSha256 = await platformInputDigest(root, 'darwin-arm64')
+  const runtime = report.runtime
+  if (runtime?.format !== 'sea' || runtime.platform !== 'darwin-arm64' ||
+      runtime.provisional !== false || runtime.sourceInputSha256 !== macosSourceInputSha256) {
+    throw new Error('combined release staging 的 macOS package report source input digest 已过期')
+  }
+  await assertCommitIsHeadAncestor(runtime.artifactSourceCommit, 'macOS artifactSourceCommit')
+  for (const [key, artifactKind] of [
+    ['releasePackageManifest', 'macos-app'],
+    ['releaseDmgManifest', 'macos-dmg'],
+  ]) {
+    const summary = report.manifests?.[key]
+    const manifestRuntime = summary?.runtime
+    if (summary?.status !== 'present' || summary.schemaVersion !== 6 || summary.artifactKind !== artifactKind ||
+        manifestRuntime?.format !== 'sea' || manifestRuntime.platform !== 'darwin-arm64' ||
+        manifestRuntime.provisional !== false ||
+        manifestRuntime.sourceInputSha256 !== macosSourceInputSha256 ||
+        manifestRuntime.artifactSourceCommit !== runtime.artifactSourceCommit ||
+        manifestRuntime.executable?.sha256 !== runtime.executable?.sha256 ||
+        manifestRuntime.executable?.bytes !== runtime.executable?.bytes) {
+      throw new Error(`combined release staging 的 macOS ${artifactKind} manifest 与 package report 不一致`)
+    }
+  }
+}
+
+async function validateCombinedPackageReport(report, assets) {
   if (report?.schemaVersion !== 3) {
     throw new Error('combined release staging 要求 schemaVersion=3 的 package report')
   }
@@ -213,12 +660,13 @@ function validateCombinedPackageReport(report, assets) {
   assertPackageReportSummary(report, 'releaseWindowsNsisManifest')
   assertPackageReportSummary(report, 'releaseWindowsInstalledTreeManifest')
   assertPackageReportSummary(report, 'releasePortableManifest')
-  assertReportShaMatchesAsset(dmg.sha256, presentAsset(assets, 'macos-dmg'), 'DMG')
-  assertReportShaMatchesAsset(windowsInstaller.sha256, presentAsset(assets, 'windows-nsis'), 'Windows NSIS')
-  assertReportShaMatchesAsset(windowsPortableArchive.sha256, presentAsset(assets, 'windows-portable'), 'Windows portable ZIP')
+  assertReportFileMetricMatchesAsset(dmg, presentAsset(assets, 'macos-dmg'), 'DMG')
+  assertReportFileMetricMatchesAsset(windowsInstaller, presentAsset(assets, 'windows-nsis'), 'Windows NSIS')
+  assertReportFileMetricMatchesAsset(windowsPortableArchive, presentAsset(assets, 'windows-portable'), 'Windows portable ZIP')
   if (windowsPortable.archive?.status !== 'present') {
     throw new Error('combined release staging 的 package report 缺少 present portable archive 指标')
   }
+  await validateMacosCombinedIdentity(report)
 }
 
 export async function replaceDirectory(stagingDirectory, outputDirectory, fs = { exists, rename, rm }) {
@@ -255,6 +703,11 @@ export async function replaceDirectory(stagingDirectory, outputDirectory, fs = {
 
 async function writeReleaseStaging(version, outputDirectory, stagingDirectory, options = {}) {
   const assets = []
+  if (options.validateCombinedPackageReport) {
+    for (const option of ['--windows-installer', '--windows-portable']) {
+      assertExplicitCombinedInput(option)
+    }
+  }
   const dmgArg = argValue('--dmg', undefined)
   const dmg = dmgArg === undefined ? await currentDmg(version) : { status: 'present', path: resolve(dmgArg) }
   const windowsInstallerArg = argValue('--windows-installer', undefined)
@@ -271,7 +724,7 @@ async function writeReleaseStaging(version, outputDirectory, stagingDirectory, o
     assertArtifactNameMatchesVersion(basename(dmg.path), version, 'macOS DMG', isMacosDmgName)
     const target = resolve(stagingDirectory, `DeepShell.Agent_${version}_aarch64.dmg`)
     await copyFile(dmg.path, target)
-    assets.push({ label: 'macos-dmg', status: 'present', asset: basename(target), sha256: await sha256(target) })
+    assets.push({ label: 'macos-dmg', status: 'present', asset: basename(target), bytes: (await stat(target)).size, sha256: await sha256(target) })
   }
   if (windowsInstaller.status === 'missing') {
     assets.push({ label: 'windows-nsis', status: 'missing', asset: `DeepShell.Agent_${version}_x64-setup.exe` })
@@ -279,7 +732,7 @@ async function writeReleaseStaging(version, outputDirectory, stagingDirectory, o
     assertArtifactNameMatchesVersion(basename(windowsInstaller.path), version, 'Windows installer', isWindowsNsisInstallerName)
     const target = resolve(stagingDirectory, `DeepShell.Agent_${version}_x64-setup.exe`)
     await copyFile(windowsInstaller.path, target)
-    assets.push({ label: 'windows-nsis', status: 'present', asset: basename(target), sha256: await sha256(target) })
+    assets.push({ label: 'windows-nsis', status: 'present', asset: basename(target), bytes: (await stat(target)).size, sha256: await sha256(target) })
   }
   if (windowsPortable.status === 'missing') {
     assets.push({ label: 'windows-portable', status: 'missing', asset: `DeepShell.Agent_${version}_x64-portable.zip` })
@@ -287,16 +740,16 @@ async function writeReleaseStaging(version, outputDirectory, stagingDirectory, o
     assertArtifactNameMatchesVersion(basename(windowsPortable.path), version, 'Windows portable ZIP', isWindowsPortableZipName)
     const target = resolve(stagingDirectory, `DeepShell.Agent_${version}_x64-portable.zip`)
     await copyFile(windowsPortable.path, target)
-    assets.push({ label: 'windows-portable', status: 'present', asset: basename(target), sha256: await sha256(target) })
+    assets.push({ label: 'windows-portable', status: 'present', asset: basename(target), bytes: (await stat(target)).size, sha256: await sha256(target) })
   }
-  await copyJsonIfPresent(
+  const licenseInventory = await copyJsonIfPresent(
     resolve(argValue('--license-inventory', resolve(root, 'runtime/staging/license-inventory.json'))),
     resolve(stagingDirectory, `deepshell-agent-v${version}-license-inventory.json`),
     assets,
     'license-inventory',
     version
   )
-  await copyJsonIfPresent(
+  const sbom = await copyJsonIfPresent(
     resolve(argValue('--sbom', resolve(root, 'runtime/staging/sbom.json'))),
     resolve(stagingDirectory, `deepshell-agent-v${version}-sbom.json`),
     assets,
@@ -317,9 +770,69 @@ async function writeReleaseStaging(version, outputDirectory, stagingDirectory, o
     'security-audit',
     version
   )
+  const windowsProvenance = options.requireWindowsProvenance || hasArg('--windows-provenance')
+    ? await copyJsonIfPresent(
+      resolve(argValue('--windows-provenance', resolve(root, 'runtime/staging/windows-provenance.json'))),
+      resolve(stagingDirectory, `deepshell-agent-v${version}-windows-provenance.json`),
+      assets,
+      'windows-provenance',
+      version
+    )
+    : null
+  const windowsLicenseInventory = options.requireWindowsProvenance || hasArg('--windows-license-inventory')
+    ? await copyJsonIfPresent(
+      resolve(argValue('--windows-license-inventory', resolve(root, 'runtime/staging/windows-license-inventory.json'))),
+      resolve(stagingDirectory, `deepshell-agent-v${version}-windows-license-inventory.json`),
+      assets,
+      'windows-license-inventory',
+      version
+    )
+    : null
+  const windowsSbom = options.requireWindowsProvenance || hasArg('--windows-sbom')
+    ? await copyJsonIfPresent(
+      resolve(argValue('--windows-sbom', resolve(root, 'runtime/staging/windows-sbom.json'))),
+      resolve(stagingDirectory, `deepshell-agent-v${version}-windows-sbom.json`),
+      assets,
+      'windows-sbom',
+      version
+    )
+    : null
+  const windowsSecurityAudit = options.requireWindowsProvenance || hasArg('--windows-security-audit')
+    ? await copyJsonIfPresent(
+      resolve(argValue('--windows-security-audit', resolve(root, 'runtime/staging/windows-security-audit.json'))),
+      resolve(stagingDirectory, `deepshell-agent-v${version}-windows-security-audit.json`),
+      assets,
+      'windows-security-audit',
+      version
+    )
+    : null
+  let windowsReleaseMetadata = {
+    notesLine: windowsNotesLine(version),
+    manifestFields: windowsManifestFields(version),
+  }
   if (options.validateCombinedPackageReport) {
-    validateCombinedPackageReport(packageReport, assets)
-    validateCompletedSecurityAudit(securityAudit)
+    for (const option of ['--windows-provenance', '--windows-license-inventory', '--windows-sbom', '--windows-security-audit']) {
+      assertExplicitCombinedInput(option)
+    }
+    await validateCombinedPackageReport(packageReport, assets)
+    const macIdentity = expectedIdentityFromRuntime(packageReport.runtime, version, 'macOS package report')
+    const windowsIdentity = expectedIdentityFromRuntime(
+      packageReport.manifests?.releaseWindowsNsisManifest?.runtime,
+      version,
+      'Windows package report',
+    )
+    await validateSupportEvidenceGroup({
+      licenseInventory,
+      sbom,
+      securityAudit,
+    }, macIdentity, 'macOS')
+    await validateWindowsProvenance(windowsProvenance, packageReport, assets, version)
+    windowsReleaseMetadata = windowsReleaseMetadataFromProvenance(version, windowsProvenance)
+    await validateSupportEvidenceGroup({
+      licenseInventory: windowsLicenseInventory,
+      sbom: windowsSbom,
+      securityAudit: windowsSecurityAudit,
+    }, windowsIdentity, 'Windows')
   }
 
   const presentAssets = assets.filter(asset => asset.status === 'present')
@@ -336,7 +849,7 @@ async function writeReleaseStaging(version, outputDirectory, stagingDirectory, o
     '- macOS arm64: developer preview packaging lane.',
     '- Code signing: ad-hoc/local signing only.',
     '- Apple notarization: not performed.',
-    windowsNotesLine(version),
+    windowsReleaseMetadata.notesLine,
     '',
     '## Assets',
     '',
@@ -350,9 +863,9 @@ async function writeReleaseStaging(version, outputDirectory, stagingDirectory, o
     generatedAt: new Date().toISOString(),
     assets,
     publishPolicy: 'local staging only; GitHub release creation and asset upload require explicit user authorization',
-    // Windows 验收事实由 `lib/windows-acceptance.mjs` **按版本**提供，notes 与 manifest 共用同一份渲染，
-    // 因此两处不可能出现"版本与验收结论不一致"。未登记的版本会如实输出"无验收记录"。
-    ...windowsManifestFields(version)
+    // 草稿模式从静态版本登记读取 Windows 验收事实；最终 combined 模式从已校验 provenance 读取。
+    // 两种模式均让 notes 与 manifest 共用同一事实，避免验收状态与轮次自相矛盾。
+    ...windowsReleaseMetadata.manifestFields
   }))
   return assets
 }
@@ -367,7 +880,19 @@ export async function runReleaseStaging() {
     .split(',')
     .map(value => value.trim())
     .filter(Boolean)
-  for (const option of ['--dmg', '--windows-installer', '--windows-portable', '--license-inventory', '--sbom', '--package-report', '--security-audit']) {
+  for (const option of [
+    '--dmg',
+    '--windows-installer',
+    '--windows-portable',
+    '--license-inventory',
+    '--sbom',
+    '--package-report',
+    '--security-audit',
+    '--windows-provenance',
+    '--windows-license-inventory',
+    '--windows-sbom',
+    '--windows-security-audit',
+  ]) {
     assertExplicitInputOutsideOutput(option, outputDirectory)
   }
   await assertOutputDirectoryMayBeReplaced(version, outputDirectory)
@@ -378,6 +903,7 @@ export async function runReleaseStaging() {
       .every(label => requiredAssets.includes(label))
     const assets = await writeReleaseStaging(version, outputDirectory, stagingDirectory, {
       validateCombinedPackageReport: combinedPackageReportRequired,
+      requireWindowsProvenance: combinedPackageReportRequired,
     })
     for (const label of requiredAssets) {
       const asset = assets.find(item => item.label === label)

@@ -69,6 +69,8 @@ describe('构建输入指纹', () => {
     expect(platformSourceInputs['darwin-arm64']).toContain('scripts/lib/package-manifest.mjs')
     expect(platformSourceInputs['win32-x64']).toContain('scripts/lib/package-manifest.mjs')
     expect(platformSourceInputs['darwin-arm64']).toContain('scripts/lib/package-report-mode.mjs')
+    expect(platformSourceInputs['darwin-arm64']).toContain('scripts/lib/direct-npm-dependencies.mjs')
+    expect(platformSourceInputs['darwin-arm64']).toContain('scripts/lib/release-evidence-identity.mjs')
     expect(platformSourceInputs['darwin-arm64']).toContain('scripts/lib/runtime-acceptance.mjs')
     expect(platformSourceInputs['darwin-arm64']).toContain('scripts/benchmark-sea-runtime.mjs')
     expect(platformSourceInputs['darwin-arm64']).toContain('scripts/collect-sea-on-device.mjs')
@@ -76,6 +78,8 @@ describe('构建输入指纹', () => {
     expect(platformSourceInputs['win32-x64']).toContain('scripts/collect-sea-on-device.mjs')
     expect(platformSourceInputs['win32-x64']).toContain('scripts/test-sea-external-plugin.mjs')
     expect(platformSourceInputs['win32-x64']).toContain('scripts/lib/package-report-mode.mjs')
+    expect(platformSourceInputs['win32-x64']).toContain('scripts/lib/direct-npm-dependencies.mjs')
+    expect(platformSourceInputs['win32-x64']).toContain('scripts/lib/release-evidence-identity.mjs')
     for (const declaration of [
       'scripts/lib/artifact-selection.d.mts',
       'scripts/lib/package-manifest.d.mts',
@@ -83,6 +87,7 @@ describe('构建输入指纹', () => {
       'scripts/lib/package-platform.d.mts',
       'scripts/lib/package-size.d.mts',
       'scripts/lib/process-plan.d.mts',
+      'scripts/lib/release-evidence-identity.d.mts',
       'scripts/lib/source-inputs.d.mts',
       'scripts/lib/tree-manifest.d.mts',
       'scripts/lib/windows-acceptance.d.mts',
